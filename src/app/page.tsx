@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 
 // Type definitions
@@ -57,10 +57,18 @@ const PORTFOLIO_ITEMS: PortfolioItem[] = [
 
 export default function HomePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!uploadPreviewUrl) return;
+
+    return () => URL.revokeObjectURL(uploadPreviewUrl);
+  }, [uploadPreviewUrl]);
 
   useEffect(() => {
     // Initialize Doodle System
-    const initializeDoodle = (): void => {
+    const initializeDoodle = (): (() => void) | void => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
@@ -80,24 +88,49 @@ export default function HomePage() {
       let isActive = false;
       let currentColor = "#f59e0b";
       let currentSize = 5;
+      let resizeRafId = 0;
+      let lastCanvasWidth = 0;
+      let lastCanvasHeight = 0;
+      let resizeObserver: ResizeObserver | null = null;
+
+      const scheduleResizeCanvas = (): void => {
+        if (resizeRafId) return;
+
+        resizeRafId = window.requestAnimationFrame(() => {
+          resizeRafId = 0;
+          resizeCanvas();
+        });
+      };
 
       const resizeCanvas = (): void => {
         const tempCanvas = document.createElement("canvas");
         const tempCtx = tempCanvas.getContext("2d");
         if (!tempCtx) return;
 
+        const nextCanvasWidth = Math.max(
+          document.documentElement.scrollWidth,
+          window.innerWidth,
+        );
+        const nextCanvasHeight = Math.max(
+          document.documentElement.scrollHeight,
+          window.innerHeight,
+        );
+
+        if (
+          nextCanvasWidth === lastCanvasWidth &&
+          nextCanvasHeight === lastCanvasHeight
+        ) {
+          return;
+        }
+
         tempCanvas.width = canvas.width;
         tempCanvas.height = canvas.height;
         tempCtx.drawImage(canvas, 0, 0);
 
-        canvas.width = Math.max(
-          document.documentElement.scrollWidth,
-          window.innerWidth,
-        );
-        canvas.height = Math.max(
-          document.documentElement.scrollHeight,
-          window.innerHeight,
-        );
+        canvas.width = nextCanvasWidth;
+        canvas.height = nextCanvasHeight;
+        lastCanvasWidth = nextCanvasWidth;
+        lastCanvasHeight = nextCanvasHeight;
 
         ctx.drawImage(tempCanvas, 0, 0);
         updateBrush();
@@ -112,8 +145,10 @@ export default function HomePage() {
         ctx.shadowColor = currentColor;
       };
 
-      window.addEventListener("resize", resizeCanvas);
-      setInterval(resizeCanvas, 2000); // Account for dynamic content height changes
+      window.addEventListener("resize", scheduleResizeCanvas);
+      resizeObserver = new ResizeObserver(scheduleResizeCanvas);
+      resizeObserver.observe(document.documentElement);
+      resizeObserver.observe(document.body);
       resizeCanvas();
 
       const getPosition = (
@@ -123,7 +158,7 @@ export default function HomePage() {
           e instanceof TouchEvent && e.touches[0]
             ? e.touches[0]
             : (e as MouseEvent);
-        return { x: touch.clientX, y: touch.clientY };
+        return { x: touch.pageX, y: touch.pageY };
       };
 
       const startDrawing = (e: MouseEvent | TouchEvent): void => {
@@ -233,7 +268,153 @@ export default function HomePage() {
       );
       window.addEventListener("touchend", stopDrawing as EventListener);
 
-      // Cleanup is handled by useEffect dependency array
+      return () => {
+        if (resizeRafId) {
+          window.cancelAnimationFrame(resizeRafId);
+        }
+        resizeObserver?.disconnect();
+        window.removeEventListener("resize", scheduleResizeCanvas);
+        window.removeEventListener("mouseup", stopDrawing as EventListener);
+        window.removeEventListener("touchend", stopDrawing as EventListener);
+      };
+    };
+
+    const initializeAboutPolaroid = (): void => {
+      const aboutCard = document.querySelector<HTMLElement>(
+        ".about-polaroid-card",
+      );
+      if (!aboutCard) return;
+
+      let activeCard: PolaroidCardElement | null = null;
+      let startX = 0;
+      let startY = 0;
+      let moveX = 0;
+      let moveY = 0;
+      let baseX = Number(aboutCard.dataset.posX ?? "0");
+      let baseY = Number(aboutCard.dataset.posY ?? "0");
+      let baseRotation = Number(aboutCard.dataset.rotation ?? "0.5");
+      let isDragging = false;
+      let pendingDragUpdate = false;
+
+      const applyCardTransform = (
+        card: HTMLElement,
+        offsetX: number,
+        offsetY: number,
+        rotation: number,
+      ): void => {
+        card.style.transform = `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) rotate(${rotation}deg)`;
+      };
+
+      const startDrag = (e: MouseEvent | TouchEvent): void => {
+        e.preventDefault();
+        activeCard = (e.currentTarget ?? e.target) as PolaroidCardElement;
+        isDragging = true;
+
+        const clientX =
+          "touches" in e && e.touches[0]
+            ? e.touches[0].clientX
+            : (e as MouseEvent).clientX;
+        const clientY =
+          "touches" in e && e.touches[0]
+            ? e.touches[0].clientY
+            : (e as MouseEvent).clientY;
+
+        startX = clientX;
+        startY = clientY;
+
+        if (activeCard) {
+          activeCard.style.transition = "none";
+          activeCard.style.cursor = "grabbing";
+          activeCard.style.willChange = "transform";
+        }
+
+        document.addEventListener("mousemove", onDrag as EventListener);
+        document.addEventListener("touchmove", onDrag as EventListener, {
+          passive: false,
+        });
+        document.addEventListener("mouseup", endDrag as EventListener);
+        document.addEventListener("touchend", endDrag as EventListener);
+      };
+
+      const onDrag = (e: MouseEvent | TouchEvent): void => {
+        if (!isDragging || !activeCard) return;
+        e.preventDefault();
+
+        const clientX =
+          "touches" in e && e.touches[0]
+            ? e.touches[0].clientX
+            : (e as MouseEvent).clientX;
+        const clientY =
+          "touches" in e && e.touches[0]
+            ? e.touches[0].clientY
+            : (e as MouseEvent).clientY;
+
+        moveX = clientX - startX;
+        moveY = clientY - startY;
+
+        if (!pendingDragUpdate) {
+          pendingDragUpdate = true;
+          requestAnimationFrame(() => {
+            if (activeCard && isDragging) {
+              const nextX = baseX + moveX;
+              const nextY = baseY + moveY;
+              const rotation = baseRotation + moveX / 20;
+              applyCardTransform(activeCard, nextX, nextY, rotation);
+            }
+            pendingDragUpdate = false;
+          });
+        }
+      };
+
+      const endDrag = (): void => {
+        if (!isDragging || !activeCard) return;
+        isDragging = false;
+
+        document.removeEventListener("mousemove", onDrag as EventListener);
+        document.removeEventListener("touchmove", onDrag as EventListener);
+        document.removeEventListener("mouseup", endDrag as EventListener);
+        document.removeEventListener("touchend", endDrag as EventListener);
+
+        // Get card dimensions
+        const cardRect = activeCard.getBoundingClientRect();
+        const cardWidth = cardRect.width;
+        const cardHeight = cardRect.height;
+        const windowWidth = window.innerWidth;
+        const windowHeight = window.innerHeight;
+
+        // Calculate bounds - keep the full card within the viewport
+        const maxX = windowWidth / 2 - cardWidth / 2;
+        const minX = -windowWidth / 2 + cardWidth / 2;
+        const maxY = windowHeight / 2 - cardHeight / 2;
+        const minY = -windowHeight / 2 + cardHeight / 2;
+
+        const nextX = Math.max(minX, Math.min(maxX, baseX + moveX));
+        const nextY = Math.max(minY, Math.min(maxY, baseY + moveY));
+        const nextRotation = baseRotation + moveX / 20;
+
+        activeCard.style.transition =
+          "transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)";
+        activeCard.style.willChange = "auto";
+        applyCardTransform(activeCard, nextX, nextY, nextRotation);
+        activeCard.style.cursor = "grab";
+        activeCard.dataset.posX = String(nextX);
+        activeCard.dataset.posY = String(nextY);
+        activeCard.dataset.rotation = String(nextRotation);
+        baseX = nextX;
+        baseY = nextY;
+        baseRotation = nextRotation;
+
+        activeCard = null;
+        moveX = 0;
+        moveY = 0;
+      };
+
+      aboutCard.addEventListener("mousedown", startDrag as EventListener);
+      aboutCard.addEventListener("touchstart", startDrag as EventListener, {
+        passive: false,
+      });
+
+      applyCardTransform(aboutCard, baseX, baseY, baseRotation);
     };
 
     const initializeStack = (): void => {
@@ -473,13 +654,18 @@ export default function HomePage() {
     // Initialize stack first (cards will start hidden)
     initializeStack();
 
+    // Initialize about polaroid drag
+    initializeAboutPolaroid();
+
     // Initialize doodle system
-    initializeDoodle();
+    const cleanupDoodle = initializeDoodle();
 
     // Animate cards after hero text animation completes
     setTimeout(() => {
       (window as any).animateCardsOnLoad?.();
     }, 1000);
+
+    return cleanupDoodle;
   }, []);
 
   return (
@@ -488,7 +674,7 @@ export default function HomePage() {
       <canvas
         ref={canvasRef}
         id="doodle-canvas"
-        className="pointer-events-none absolute top-0 left-0 z-40 transition-opacity duration-300 opacity-100"
+        className="pointer-events-none absolute top-0 left-0 z-40 opacity-100 transition-opacity duration-300"
       />
 
       <header className="fixed top-0 z-50 flex h-14 w-full items-center justify-center border-b border-stone-100/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-stone-800/50 dark:bg-stone-950/70 dark:shadow-none">
@@ -520,7 +706,7 @@ export default function HomePage() {
       </header>
 
       <main
-        className="px-wall-margin relative -m-15 flex grow flex-col items-center justify-center pt-0 pb-12"
+        className="px-wall-margin relative -m-15 flex min-h-screen flex-col items-center justify-center pt-0 pb-12"
         id="portfolio"
       >
         {/* Hero Typography Layer */}
@@ -555,7 +741,7 @@ export default function HomePage() {
             return (
               <div
                 key={item.id}
-                className="polaroid-card absolute flex origin-center flex-col bg-white p-[10px] pb-[56px]"
+                className="polaroid-card absolute flex origin-center flex-col bg-white p-2.5 pb-14"
                 style={{
                   transform: `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) rotate(${item.rotation})`,
                   zIndex: zIndex,
@@ -568,7 +754,7 @@ export default function HomePage() {
                     "transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.6s",
                 }}
               >
-                <div className="relative flex-grow overflow-hidden bg-stone-50">
+                <div className="relative grow overflow-hidden bg-stone-50">
                   <Image
                     src={item.image}
                     alt={item.title}
@@ -577,7 +763,7 @@ export default function HomePage() {
                     unoptimized
                   />
                 </div>
-                <div className="mt-2 flex h-[46px] flex-col items-center justify-center">
+                <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
                   <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
                     Photography
                   </span>
@@ -589,7 +775,7 @@ export default function HomePage() {
             );
           })}
         </div>
-       
+
         <button
           className="group absolute left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-stone-200/80 bg-white/80 px-6 py-3 opacity-0 shadow-[0_12px_40px_rgba(0,0,0,0.06)] backdrop-blur-md transition-all duration-700 hover:border-stone-300 hover:bg-white hover:shadow-[0_16px_50px_rgba(0,0,0,0.08)]"
           style={{
@@ -617,6 +803,167 @@ export default function HomePage() {
         </div>
       </main>
 
+      {/* About Me Section */}
+      <section
+        className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-white px-12 py-20 dark:bg-stone-950"
+        id="about"
+      >
+        <div className="absolute inset-0 flex items-center justify-center">
+          {/* Draggable About Polaroid */}
+          <div
+            className="about-polaroid-card absolute flex origin-center cursor-grab flex-col bg-white p-2.5 pb-16 shadow-[0_28px_90px_rgba(0,0,0,0.24)] ring-1 ring-black/5 active:cursor-grabbing"
+            style={{
+              width: "380px",
+              height: "600px",
+              transform: "translate(-50%, -50%) rotate(0.5deg)",
+              zIndex: 10,
+              pointerEvents: "auto",
+              top: "50%",
+              left: "50%",
+            }}
+          >
+            <div className="relative grow overflow-hidden bg-stone-50">
+              <Image
+                src="/me.JPG"
+                alt="Howa"
+                fill
+                className="h-full w-full object-cover"
+                unoptimized
+              />
+            </div>
+            <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
+              <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
+                Portrait
+              </span>
+              <span className="font-sans text-[1.1rem] font-black tracking-[-0.06em] text-stone-900 uppercase">
+                Howa
+              </span>
+            </div>
+          </div>
+
+          {/* Scrolling Text Below Polaroid */}
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-0 -translate-y-1/2 overflow-hidden py-12">
+            <style>{`
+              @keyframes scroll-rtl {
+                0% {
+                  transform: translateX(0);
+                }
+                100% {
+                  transform: translateX(-50%);
+                }
+              }
+              
+              .scrolling-text {
+                display: flex;
+                white-space: nowrap;
+                width: max-content;
+                min-width: 200%;
+                animation: scroll-rtl 32s linear infinite;
+                font-size: clamp(4rem, 9vw, 9rem);
+                line-height: 0.92;
+                letter-spacing: -0.08em;
+              }
+              
+              .scrolling-text span {
+                padding-right: 6rem;
+              }
+            `}</style>
+            <div className="scrolling-text items-center">
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+                I photograph to show the ordinary differently, using details,
+                emotion, and abstraction to turn everyday scenes into meaningful
+                stories.
+              </span>
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+                I photograph to show the ordinary differently, using details,
+                emotion, and abstraction to turn everyday scenes into meaningful
+                stories.
+              </span>
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+                I photograph to show the ordinary differently, using details,
+                emotion, and abstraction to turn everyday scenes into meaningful
+                stories.
+              </span>
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+                I photograph to show the ordinary differently, using details,
+                emotion, and abstraction to turn everyday scenes into meaningful
+                stories.
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Your Turn Section */}
+      <section
+        className="relative flex min-h-screen w-full items-center justify-center overflow-hidden border-t border-stone-100 bg-white px-12 py-20 dark:border-stone-800 dark:bg-stone-950"
+        id="your-turn"
+      >
+        <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden opacity-70">
+          <h2 className="text-center font-sans text-[clamp(7rem,18vw,18rem)] leading-[0.8] font-black -tracking-widest text-stone-900 uppercase dark:text-stone-100">
+            Your Turn
+          </h2>
+        </div>
+
+        <div className="relative z-10 flex flex-col items-center gap-6">
+          <button
+            className="group relative flex cursor-pointer flex-col items-center"
+            type="button"
+            onClick={() => uploadInputRef.current?.click()}
+          >
+            <div
+              className="your-turn-polaroid-card flex flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-500 group-hover:scale-[1.02] group-hover:-rotate-1"
+              style={{
+                width: "520px",
+                height: "520px",
+                transform: "rotate(1.5deg)",
+              }}
+            >
+              <div className="relative grow overflow-hidden bg-stone-50">
+                {uploadPreviewUrl ? (
+                  <Image
+                    src={uploadPreviewUrl}
+                    alt="Uploaded preview"
+                    fill
+                    unoptimized
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03),transparent_55%)]">
+                    <span className="material-symbols-outlined text-6xl text-stone-200 transition-colors duration-500 group-hover:text-amber-500/60">
+                      add_photo_alternate
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
+                <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
+                  New Perspective
+                </span>
+                <span className="font-sans text-[1.1rem] font-black tracking-[-0.06em] text-stone-400 uppercase transition-colors duration-500 group-hover:text-stone-900">
+                  Click to contribute
+                </span>
+              </div>
+            </div>
+
+            <input
+              ref={uploadInputRef}
+              accept="image/*"
+              className="hidden"
+              type="file"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+
+                const nextUrl = URL.createObjectURL(file);
+                setUploadPreviewUrl(nextUrl);
+              }}
+            />
+          </button>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="mt-auto mb-8 flex w-full flex-col items-center gap-6 bg-transparent py-12">
         <div className="font-section-cursive text-2xl text-stone-600">
@@ -628,10 +975,10 @@ export default function HomePage() {
       </footer>
 
       {/* Doodle Controls Fixed Position */}
-      <div className="fixed bottom-8 right-8 z-50 flex flex-col items-end gap-4">
+      <div className="fixed right-8 bottom-8 z-50 flex flex-col items-end gap-4">
         {/* Doodle Toolbar (Visible when active) */}
         <div
-          className="hidden flex-col gap-4 rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-2xl transition-all duration-300 transform translate-y-4 opacity-0 backdrop-blur-xl"
+          className="hidden translate-y-4 transform flex-col gap-4 rounded-2xl border border-stone-200 bg-white/90 p-4 opacity-0 shadow-2xl backdrop-blur-xl transition-all duration-300"
           id="doodle-toolbar"
         >
           {/* Color Presets */}
@@ -639,26 +986,54 @@ export default function HomePage() {
             <span className="font-metadata-caps text-[8px] tracking-widest text-stone-400 uppercase">
               Color
             </span>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-8 gap-2">
               <button
-                className="color-swatch active h-6 w-6 rounded-full border-2 border-white shadow-sm ring-2 ring-amber-500"
+                className="color-swatch active h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm ring-2 ring-amber-500 transition-transform hover:scale-110"
                 data-color="#f59e0b"
                 style={{ backgroundColor: "#f59e0b" }}
+                title="Orange"
               />
               <button
-                className="color-swatch h-6 w-6 rounded-full border-2 border-white shadow-sm"
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
+                data-color="#ef4444"
+                style={{ backgroundColor: "#ef4444" }}
+                title="Red"
+              />
+              <button
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
+                data-color="#ec4899"
+                style={{ backgroundColor: "#ec4899" }}
+                title="Pink"
+              />
+              <button
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
                 data-color="#06b6d4"
                 style={{ backgroundColor: "#06b6d4" }}
+                title="Cyan"
               />
               <button
-                className="color-swatch h-6 w-6 rounded-full border-2 border-white shadow-sm"
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
+                data-color="#22c55e"
+                style={{ backgroundColor: "#22c55e" }}
+                title="Green"
+              />
+              <button
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
                 data-color="#d946ef"
                 style={{ backgroundColor: "#d946ef" }}
+                title="Magenta"
               />
               <button
-                className="color-swatch h-6 w-6 rounded-full border-2 border-white shadow-sm"
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
+                data-color="#6366f1"
+                style={{ backgroundColor: "#6366f1" }}
+                title="Indigo"
+              />
+              <button
+                className="color-swatch h-6 w-6 cursor-pointer rounded-full border-2 border-white shadow-sm transition-transform hover:scale-110"
                 data-color="#1c1b1b"
                 style={{ backgroundColor: "#1c1b1b" }}
+                title="Black"
               />
             </div>
           </div>
@@ -668,22 +1043,25 @@ export default function HomePage() {
             <span className="font-metadata-caps text-[8px] tracking-widest text-stone-400 uppercase">
               Size
             </span>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center gap-3">
               <button
-                className="size-preset flex items-center justify-center rounded p-1 hover:bg-stone-100 transition-colors"
+                className="size-preset flex cursor-pointer items-center justify-center rounded p-1 transition-colors hover:bg-stone-100"
                 data-size="2"
+                title="Small"
               >
                 <div className="h-1 w-1 rounded-full bg-stone-600" />
               </button>
               <button
                 className="size-preset active-size flex items-center justify-center rounded bg-stone-100 p-1 ring-1 ring-stone-200"
                 data-size="5"
+                title="Medium"
               >
                 <div className="h-2 w-2 rounded-full bg-stone-600" />
               </button>
               <button
-                className="size-preset flex items-center justify-center rounded p-1 hover:bg-stone-100 transition-colors"
+                className="size-preset flex cursor-pointer items-center justify-center rounded p-1 transition-colors hover:bg-stone-100"
                 data-size="10"
+                title="Large"
               >
                 <div className="h-3 w-3 rounded-full bg-stone-600" />
               </button>
@@ -693,7 +1071,7 @@ export default function HomePage() {
 
           {/* Actions */}
           <button
-            className="flex items-center gap-2 text-stone-500 transition-colors hover:text-red-500"
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-stone-500 transition-colors hover:bg-red-50 hover:text-red-500"
             id="clear-doodle-btn"
           >
             <span className="material-symbols-outlined text-sm">delete</span>
@@ -705,13 +1083,13 @@ export default function HomePage() {
 
         {/* Main Toggle */}
         <button
-          className="group flex items-center gap-3 rounded-full border border-stone-200 bg-white/80 px-6 py-3 shadow-lg transition-all backdrop-blur-xl hover:border-amber-400 active:scale-95"
+          className="group flex items-center gap-3 rounded-full border border-stone-200 bg-white/80 px-6 py-3 shadow-lg backdrop-blur-xl transition-all hover:border-amber-400 active:scale-95"
           id="doodle-toggle-btn"
         >
           <span className="material-symbols-outlined text-amber-600 transition-transform group-hover:rotate-12">
             draw
           </span>
-          <span className="font-metadata-caps text-[10px] tracking-[0.3em] text-stone-500 transition-colors uppercase group-hover:text-amber-700">
+          <span className="font-metadata-caps text-[10px] tracking-[0.3em] text-stone-500 uppercase transition-colors group-hover:text-amber-700">
             Doodle Mode
           </span>
         </button>
