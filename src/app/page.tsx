@@ -53,6 +53,7 @@ const PORTFOLIO_ITEMS: PortfolioItem[] = [
   { id: 14, title: "Are We at War?", image: "/14.jpg", rotation: "1.5deg" },
   { id: 15, title: "Like Him", image: "/15.png", rotation: "-0.5deg" },
   { id: 16, title: "Where is my GF?", image: "/16.jpg", rotation: "0.7deg" },
+  { id: 17, title: "the key", image: "/17.jpg", rotation: "-1.2deg" },
 ];
 
 export default function HomePage() {
