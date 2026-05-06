@@ -1,6 +1,35 @@
 @import "tailwindcss";
 
+html {
+  scroll-behavior: smooth;
+}
+
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+/* Pinyon Script Font - Elegant Script for Headings */
+.font-brand-display,
+.font-section-cursive {
+  font-family: var(--font-pinyon-script, "Pinyon Script", cursive) !important;
+}
+
+.polaroid-stack {
+  perspective: 1200px;
+}
+
+.polaroid-card {
+  transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1),
+    box-shadow 0.6s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  cursor: grab;
+  user-select: none;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+}
+
+.polaroid-card:active {
+  cursor: grabbing;
 }
