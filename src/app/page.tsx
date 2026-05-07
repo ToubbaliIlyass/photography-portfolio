@@ -5,7 +5,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { LayoutGroup, motion, useScroll, useTransform } from "framer-motion";
+import {
+  LayoutGroup,
+  motion,
+  useMotionValueEvent,
+  useScroll,
+  useTransform,
+} from "framer-motion";
 
 // Type definitions
 interface PortfolioItem {
@@ -82,6 +88,7 @@ export default function HomePage() {
   >("idle");
   const [contactMessage, setContactMessage] = useState("");
   const [contactRevealStarted, setContactRevealStarted] = useState(false);
+  const [contactFormVisible, setContactFormVisible] = useState(false);
 
   const { scrollYProgress } = useScroll({
     target: wrapperRef,
@@ -201,6 +208,7 @@ export default function HomePage() {
     setContributionTitle(nextTitle.trim() || "What do you see?");
     setTitleModalOpen(false);
     setContactRevealStarted(true);
+    setContactFormVisible(false);
     clearRevealTimers();
 
     requestAnimationFrame(() => {
@@ -214,6 +222,12 @@ export default function HomePage() {
   useEffect(() => {
     return () => clearRevealTimers();
   }, []);
+
+  useMotionValueEvent(scrollYProgress, "change", (latest) => {
+    if (!contactRevealStarted) return;
+
+    setContactFormVisible(latest >= 0.9);
+  });
 
   useEffect(() => {
     const measureStage = () => {
@@ -1200,6 +1214,7 @@ export default function HomePage() {
               setPendingTitle("");
               setTitleModalOpen(true);
               setContactRevealStarted(false);
+              setContactFormVisible(false);
               setContactStatus("idle");
               setContactMessage("");
             }}
@@ -1255,10 +1270,10 @@ export default function HomePage() {
               onSubmit={handleContactSubmit}
               initial={false}
               animate={{
-                opacity: contactRevealStarted ? 1 : 0,
-                y: contactRevealStarted ? 0 : 28,
+                opacity: contactFormVisible ? 1 : 0,
+                y: contactFormVisible ? 0 : 18,
               }}
-              transition={{ duration: 0.65, ease: "easeOut", delay: 0.7 }}
+              transition={{ duration: 0.7, ease: "easeOut" }}
             >
               <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
                 <div>
