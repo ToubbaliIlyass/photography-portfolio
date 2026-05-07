@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
+import { LayoutGroup, motion, useScroll, useTransform } from "framer-motion";
 
 // Type definitions
 interface PortfolioItem {
@@ -60,6 +60,9 @@ const PORTFOLIO_ITEMS: PortfolioItem[] = [
 export default function HomePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const yourTurnPlaceholderRef = useRef<HTMLDivElement>(null);
+  const contactPlaceholderRef = useRef<HTMLDivElement>(null);
   const contactSectionRef = useRef<HTMLElement>(null);
   const revealTimeoutsRef = useRef<number[]>([]);
   const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
@@ -68,15 +71,68 @@ export default function HomePage() {
     useState("What do you see?");
   const [titleModalOpen, setTitleModalOpen] = useState(false);
   const [pendingTitle, setPendingTitle] = useState("");
-  const [contactRevealStep, setContactRevealStep] = useState(0);
-  const [scrollProgress, setScrollProgress] = useState(0);
+  const [stageGeometry, setStageGeometry] = useState<{
+    start: { left: number; top: number; width: number; height: number } | null;
+    end: { left: number; top: number; width: number; height: number } | null;
+  }>({ start: null, end: null });
   const [contactName, setContactName] = useState("");
   const [contactNote, setContactNote] = useState("");
   const [contactStatus, setContactStatus] = useState<
     "idle" | "sending" | "sent" | "error"
   >("idle");
   const [contactMessage, setContactMessage] = useState("");
+  const [contactRevealStarted, setContactRevealStarted] = useState(false);
 
+  const { scrollYProgress } = useScroll({
+    target: wrapperRef,
+    offset: ["start start", "end end"],
+  });
+
+  const floatingStartX = stageGeometry.start?.left ?? 0;
+  const floatingStartY = stageGeometry.start?.top ?? 0;
+  const floatingStartWidth = stageGeometry.start?.width ?? 0;
+  const floatingStartHeight = stageGeometry.start?.height ?? 0;
+  const floatingEndX = stageGeometry.end?.left ?? floatingStartX;
+  const floatingEndY = stageGeometry.end?.top ?? floatingStartY;
+  const floatingEndWidth = stageGeometry.end?.width ?? floatingStartWidth;
+  const floatingEndHeight = stageGeometry.end?.height ?? floatingStartHeight;
+
+  const floatingX = useTransform(
+    scrollYProgress,
+    [0, 1],
+    [floatingStartX, floatingEndX],
+  );
+  const floatingY = useTransform(
+    scrollYProgress,
+    [0, 1],
+    [floatingStartY, floatingEndY],
+  );
+  const floatingWidth = useTransform(
+    scrollYProgress,
+    [0, 1],
+    [floatingStartWidth, floatingEndWidth],
+  );
+  const floatingHeight = useTransform(
+    scrollYProgress,
+    [0, 1],
+    [floatingStartHeight, floatingEndHeight],
+  );
+  const floatingRotate = useTransform(scrollYProgress, [0, 1], [1.5, -3]);
+  const floatingPolaroidStyle = contactRevealStarted
+    ? {
+        x: floatingX,
+        y: floatingY,
+        width: floatingWidth,
+        height: floatingHeight,
+        rotate: floatingRotate,
+      }
+    : {
+        x: floatingStartX,
+        y: floatingStartY,
+        width: floatingStartWidth,
+        height: floatingStartHeight,
+        rotate: 1.5,
+      };
   useEffect(() => {
     if (!uploadPreviewUrl) return;
 
@@ -88,8 +144,6 @@ export default function HomePage() {
     Boolean(uploadFile) &&
     contactName.trim().length > 0 &&
     contactNote.trim().length > 0;
-  const showPolaroidInContact =
-    Boolean(uploadPreviewUrl) && contactRevealStep >= 2;
 
   const handleContactSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -146,12 +200,14 @@ export default function HomePage() {
   const beginContactReveal = (nextTitle: string) => {
     setContributionTitle(nextTitle.trim() || "What do you see?");
     setTitleModalOpen(false);
+    setContactRevealStarted(true);
     clearRevealTimers();
-    setContactRevealStep(1); // Start at step 1 on scroll
 
-    contactSectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
+    requestAnimationFrame(() => {
+      contactSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     });
   };
 
@@ -159,266 +215,57 @@ export default function HomePage() {
     return () => clearRevealTimers();
   }, []);
 
-  // Scroll-triggered animation effect
   useEffect(() => {
-    if (!uploadPreviewUrl) {
-      setScrollProgress(0);
-      setContactRevealStep(0);
-      return;
-    }
+    const measureStage = () => {
+      const wrapper = wrapperRef.current;
+      const startEl = yourTurnPlaceholderRef.current;
+      const endEl = contactPlaceholderRef.current;
 
-    const handleScroll = () => {
-      const section = contactSectionRef.current;
-      if (!section) return;
+      if (!wrapper || !startEl || !endEl) return;
 
-      const sectionRect = section.getBoundingClientRect();
-      const windowHeight = window.innerHeight;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const startRect = startEl.getBoundingClientRect();
+      const endRect = endEl.getBoundingClientRect();
 
-      // Calculate progress: 0 when section is below viewport, 1 when fully visible
-      const sectionTop = sectionRect.top;
-      const sectionHeight = sectionRect.height;
-
-      // Section starts revealing when its top enters viewport
-      let progress = 0;
-      if (sectionTop < windowHeight && sectionTop + sectionHeight > 0) {
-        progress = Math.max(
-          0,
-          Math.min(
-            1,
-            (windowHeight - sectionTop) / (windowHeight + sectionHeight),
-          ),
-        );
-      }
-
-      setScrollProgress(progress);
-
-      // Staggered reveal based on scroll progress
-      if (progress < 0.2) {
-        setContactRevealStep(1); // Background text visible
-      } else if (progress < 0.5) {
-        setContactRevealStep(2); // Polaroid visible
-      } else {
-        setContactRevealStep(3); // Form visible
-      }
+      setStageGeometry({
+        start: {
+          left: startRect.left - wrapperRect.left,
+          top: startRect.top - wrapperRect.top,
+          width: startRect.width,
+          height: startRect.height,
+        },
+        end: {
+          left: endRect.left - wrapperRect.left,
+          top: endRect.top - wrapperRect.top,
+          width: endRect.width,
+          height: endRect.height,
+        },
+      });
     };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    measureStage();
+
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(measureStage);
+    });
+
+    if (wrapperRef.current) resizeObserver.observe(wrapperRef.current);
+    if (yourTurnPlaceholderRef.current) {
+      resizeObserver.observe(yourTurnPlaceholderRef.current);
+    }
+    if (contactPlaceholderRef.current) {
+      resizeObserver.observe(contactPlaceholderRef.current);
+    }
+
+    window.addEventListener("resize", measureStage);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measureStage);
+    };
   }, [uploadPreviewUrl]);
 
   useEffect(() => {
-    // Initialize Doodle System
-    const initializeDoodle = (): (() => void) | void => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      const toggleBtn = document.getElementById(
-        "doodle-toggle-btn",
-      ) as HTMLButtonElement | null;
-      const toolbar = document.getElementById("doodle-toolbar");
-      const clearBtn = document.getElementById(
-        "clear-doodle-btn",
-      ) as HTMLButtonElement | null;
-      const colorSwatches = document.querySelectorAll(".color-swatch");
-      const sizePresets = document.querySelectorAll(".size-preset");
-
-      let isDrawing = false;
-      let isActive = false;
-      let currentColor = "#f59e0b";
-      let currentSize = 5;
-      let resizeRafId = 0;
-      let lastCanvasWidth = 0;
-      let lastCanvasHeight = 0;
-      let resizeObserver: ResizeObserver | null = null;
-
-      const scheduleResizeCanvas = (): void => {
-        if (resizeRafId) return;
-
-        resizeRafId = window.requestAnimationFrame(() => {
-          resizeRafId = 0;
-          resizeCanvas();
-        });
-      };
-
-      const resizeCanvas = (): void => {
-        const tempCanvas = document.createElement("canvas");
-        const tempCtx = tempCanvas.getContext("2d");
-        if (!tempCtx) return;
-
-        const nextCanvasWidth = Math.max(
-          document.documentElement.scrollWidth,
-          window.innerWidth,
-        );
-        const nextCanvasHeight = Math.max(
-          document.documentElement.scrollHeight,
-          window.innerHeight,
-        );
-
-        if (
-          nextCanvasWidth === lastCanvasWidth &&
-          nextCanvasHeight === lastCanvasHeight
-        ) {
-          return;
-        }
-
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
-        tempCtx.drawImage(canvas, 0, 0);
-
-        canvas.width = nextCanvasWidth;
-        canvas.height = nextCanvasHeight;
-        lastCanvasWidth = nextCanvasWidth;
-        lastCanvasHeight = nextCanvasHeight;
-
-        ctx.drawImage(tempCanvas, 0, 0);
-        updateBrush();
-      };
-
-      const updateBrush = (): void => {
-        ctx.strokeStyle = currentColor;
-        ctx.lineWidth = currentSize;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.shadowBlur = isActive ? 10 : 0;
-        ctx.shadowColor = currentColor;
-      };
-
-      window.addEventListener("resize", scheduleResizeCanvas);
-      resizeObserver = new ResizeObserver(scheduleResizeCanvas);
-      resizeObserver.observe(document.documentElement);
-      resizeObserver.observe(document.body);
-      resizeCanvas();
-
-      const getPosition = (
-        e: MouseEvent | TouchEvent,
-      ): { x: number; y: number } => {
-        const touch =
-          e instanceof TouchEvent && e.touches[0]
-            ? e.touches[0]
-            : (e as MouseEvent);
-        return { x: touch.pageX, y: touch.pageY };
-      };
-
-      const startDrawing = (e: MouseEvent | TouchEvent): void => {
-        if (!isActive) return;
-        isDrawing = true;
-        const pos = getPosition(e);
-        ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
-      };
-
-      const draw = (e: MouseEvent | TouchEvent): void => {
-        if (!isDrawing || !isActive) return;
-        const pos = getPosition(e);
-        ctx.lineTo(pos.x, pos.y);
-        ctx.stroke();
-      };
-
-      const stopDrawing = (): void => {
-        isDrawing = false;
-      };
-
-      colorSwatches.forEach((swatch) => {
-        swatch.addEventListener("click", () => {
-          colorSwatches.forEach((s) =>
-            s.classList.remove("ring-2", "ring-amber-500", "active"),
-          );
-          swatch.classList.add("ring-2", "ring-amber-500", "active");
-          currentColor = (swatch as HTMLElement).dataset.color ?? "#f59e0b";
-          updateBrush();
-        });
-      });
-
-      sizePresets.forEach((preset) => {
-        preset.addEventListener("click", () => {
-          sizePresets.forEach((p) =>
-            p.classList.remove(
-              "bg-stone-100",
-              "ring-1",
-              "ring-stone-200",
-              "active-size",
-            ),
-          );
-          preset.classList.add(
-            "bg-stone-100",
-            "ring-1",
-            "ring-stone-200",
-            "active-size",
-          );
-          currentSize = parseInt((preset as HTMLElement).dataset.size ?? "5");
-          updateBrush();
-        });
-      });
-
-      if (toggleBtn) {
-        toggleBtn.addEventListener("click", () => {
-          isActive = !isActive;
-          if (isActive) {
-            canvas.classList.remove("pointer-events-none");
-            if (toolbar) {
-              toolbar.classList.remove("hidden");
-              setTimeout(() => {
-                toolbar.classList.remove("translate-y-4", "opacity-0");
-              }, 10);
-            }
-            toggleBtn.classList.add("border-amber-400", "bg-amber-50/50");
-            const span = toggleBtn.querySelector("span:last-child");
-            if (span) span.textContent = "Exit Drawing";
-            updateBrush();
-          } else {
-            canvas.classList.add("pointer-events-none");
-            if (toolbar) {
-              toolbar.classList.add("translate-y-4", "opacity-0");
-              setTimeout(() => toolbar.classList.add("hidden"), 300);
-            }
-            toggleBtn.classList.remove("border-amber-400", "bg-amber-50/50");
-            const span = toggleBtn.querySelector("span:last-child");
-            if (span) span.textContent = "Doodle Mode";
-          }
-        });
-      }
-
-      if (clearBtn) {
-        clearBtn.addEventListener("click", () => {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-        });
-      }
-
-      canvas.addEventListener("mousedown", startDrawing as EventListener);
-      canvas.addEventListener("mousemove", draw as EventListener);
-      window.addEventListener("mouseup", stopDrawing as EventListener);
-
-      canvas.addEventListener(
-        "touchstart",
-        (e: TouchEvent) => {
-          if (isActive) e.preventDefault();
-          startDrawing(e);
-        },
-        { passive: false },
-      );
-      canvas.addEventListener(
-        "touchmove",
-        (e: TouchEvent) => {
-          if (isActive) e.preventDefault();
-          draw(e);
-        },
-        { passive: false },
-      );
-      window.addEventListener("touchend", stopDrawing as EventListener);
-
-      return () => {
-        if (resizeRafId) {
-          window.cancelAnimationFrame(resizeRafId);
-        }
-        resizeObserver?.disconnect();
-        window.removeEventListener("resize", scheduleResizeCanvas);
-        window.removeEventListener("mouseup", stopDrawing as EventListener);
-        window.removeEventListener("touchend", stopDrawing as EventListener);
-      };
-    };
-
     const initializeAboutPolaroid = (): void => {
       const aboutCard = document.querySelector<HTMLElement>(
         ".about-polaroid-card",
@@ -797,7 +644,232 @@ export default function HomePage() {
     // Initialize about polaroid drag
     initializeAboutPolaroid();
 
-    // Initialize doodle system
+    const initializeDoodle = (): (() => void) => {
+      const canvas = canvasRef.current;
+      const toggleBtn = document.getElementById("doodle-toggle-btn");
+      const toolbar = document.getElementById("doodle-toolbar");
+      const clearBtn = document.getElementById("clear-doodle-btn");
+      const colorSwatches = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".color-swatch"),
+      );
+      const sizePresets = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".size-preset"),
+      );
+
+      if (!canvas || !toggleBtn || !toolbar || !clearBtn)
+        return () => {
+          /* empty */
+        };
+
+      const context = canvas.getContext("2d");
+      if (!context)
+        return () => {
+          /* empty */
+        };
+
+      let isDoodleActive = false;
+      let isDrawing = false;
+      let brushColor = "#f59e0b";
+      let brushSize = 5;
+      let pixelRatio = window.devicePixelRatio || 1;
+      let resizeRafId = 0;
+      let scrollRafId = 0;
+
+      const resizeCanvas = (): void => {
+        const previousCanvas = document.createElement("canvas");
+        const previousContext = previousCanvas.getContext("2d");
+
+        previousCanvas.width = canvas.width;
+        previousCanvas.height = canvas.height;
+        if (previousContext && canvas.width > 0 && canvas.height > 0) {
+          previousContext.drawImage(canvas, 0, 0);
+        }
+
+        pixelRatio = window.devicePixelRatio || 1;
+        const pageWidth = Math.max(
+          document.documentElement.scrollWidth,
+          document.body.scrollWidth,
+          window.innerWidth,
+        );
+        const pageHeight = Math.max(
+          document.documentElement.scrollHeight,
+          document.body.scrollHeight,
+          window.innerHeight,
+        );
+
+        canvas.width = Math.round(pageWidth * pixelRatio);
+        canvas.height = Math.round(pageHeight * pixelRatio);
+        canvas.style.width = `${pageWidth}px`;
+        canvas.style.height = `${pageHeight}px`;
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.drawImage(previousCanvas, 0, 0);
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        updateCanvasPosition();
+      };
+
+      const scheduleResizeCanvas = (): void => {
+        if (resizeRafId) return;
+
+        resizeRafId = requestAnimationFrame(() => {
+          resizeRafId = 0;
+          resizeCanvas();
+        });
+      };
+
+      const updateCanvasPosition = (): void => {
+        canvas.style.transform = `translate(${-window.scrollX}px, ${-window.scrollY}px)`;
+      };
+
+      const scheduleCanvasPositionUpdate = (): void => {
+        if (scrollRafId) return;
+
+        scrollRafId = requestAnimationFrame(() => {
+          scrollRafId = 0;
+          updateCanvasPosition();
+        });
+      };
+
+      const applyNeonBrush = (color: string, size: number): void => {
+        context.strokeStyle = color;
+        context.lineWidth = size;
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.shadowColor = color;
+        context.shadowBlur = size * 3.2;
+        context.globalCompositeOperation = "lighter";
+      };
+
+      const setToolbarOpen = (open: boolean): void => {
+        toolbar.classList.toggle("hidden", !open);
+        requestAnimationFrame(() => {
+          toolbar.classList.toggle("translate-y-4", !open);
+          toolbar.classList.toggle("opacity-0", !open);
+        });
+      };
+
+      const setDoodleActive = (active: boolean): void => {
+        isDoodleActive = active;
+        canvas.style.pointerEvents = active ? "auto" : "none";
+        canvas.style.cursor = active ? "crosshair" : "default";
+        toggleBtn.classList.toggle("border-amber-400", active);
+        toggleBtn.classList.toggle("bg-amber-50", active);
+        const label = toggleBtn.querySelector("span:last-child");
+        if (label) label.textContent = active ? "Exit Drawing" : "Doodle Mode";
+        setToolbarOpen(active);
+      };
+
+      const getPoint = (event: PointerEvent): { x: number; y: number } => ({
+        x: event.pageX,
+        y: event.pageY,
+      });
+
+      const startDrawing = (event: PointerEvent): void => {
+        if (!isDoodleActive) return;
+        event.preventDefault();
+        isDrawing = true;
+        canvas.setPointerCapture(event.pointerId);
+        const point = getPoint(event);
+        applyNeonBrush(brushColor, brushSize);
+        context.beginPath();
+        context.moveTo(point.x, point.y);
+      };
+
+      const draw = (event: PointerEvent): void => {
+        if (!isDoodleActive || !isDrawing) return;
+        event.preventDefault();
+        const point = getPoint(event);
+        applyNeonBrush(brushColor, brushSize);
+        context.lineTo(point.x, point.y);
+        context.stroke();
+      };
+
+      const stopDrawing = (event: PointerEvent): void => {
+        if (!isDrawing) return;
+        isDrawing = false;
+        context.closePath();
+        if (canvas.hasPointerCapture(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+      };
+
+      const handleToggle = (): void => setDoodleActive(!isDoodleActive);
+
+      const handleClear = (): void => {
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      };
+
+      const handleColorClick = (event: Event): void => {
+        const button = event.currentTarget as HTMLButtonElement;
+        brushColor = button.dataset.color ?? brushColor;
+        colorSwatches.forEach((swatch) => {
+          swatch.classList.remove("active", "ring-2", "ring-amber-500");
+        });
+        button.classList.add("active", "ring-2", "ring-amber-500");
+      };
+
+      const handleSizeClick = (event: Event): void => {
+        const button = event.currentTarget as HTMLButtonElement;
+        brushSize = Number(button.dataset.size ?? brushSize);
+        sizePresets.forEach((preset) => {
+          preset.classList.remove(
+            "active-size",
+            "bg-stone-100",
+            "ring-1",
+            "ring-stone-200",
+          );
+        });
+        button.classList.add(
+          "active-size",
+          "bg-stone-100",
+          "ring-1",
+          "ring-stone-200",
+        );
+      };
+
+      resizeCanvas();
+      const resizeObserver = new ResizeObserver(scheduleResizeCanvas);
+      resizeObserver.observe(document.documentElement);
+      resizeObserver.observe(document.body);
+
+      toggleBtn.addEventListener("click", handleToggle);
+      clearBtn.addEventListener("click", handleClear);
+      canvas.addEventListener("pointerdown", startDrawing);
+      canvas.addEventListener("pointermove", draw);
+      canvas.addEventListener("pointerup", stopDrawing);
+      canvas.addEventListener("pointercancel", stopDrawing);
+      window.addEventListener("resize", scheduleResizeCanvas);
+      window.addEventListener("scroll", scheduleCanvasPositionUpdate, {
+        passive: true,
+      });
+      colorSwatches.forEach((swatch) => {
+        swatch.addEventListener("click", handleColorClick);
+      });
+      sizePresets.forEach((preset) => {
+        preset.addEventListener("click", handleSizeClick);
+      });
+
+      return () => {
+        if (resizeRafId) cancelAnimationFrame(resizeRafId);
+        if (scrollRafId) cancelAnimationFrame(scrollRafId);
+        resizeObserver.disconnect();
+        toggleBtn.removeEventListener("click", handleToggle);
+        clearBtn.removeEventListener("click", handleClear);
+        canvas.removeEventListener("pointerdown", startDrawing);
+        canvas.removeEventListener("pointermove", draw);
+        canvas.removeEventListener("pointerup", stopDrawing);
+        canvas.removeEventListener("pointercancel", stopDrawing);
+        window.removeEventListener("resize", scheduleResizeCanvas);
+        window.removeEventListener("scroll", scheduleCanvasPositionUpdate);
+        colorSwatches.forEach((swatch) => {
+          swatch.removeEventListener("click", handleColorClick);
+        });
+        sizePresets.forEach((preset) => {
+          preset.removeEventListener("click", handleSizeClick);
+        });
+      };
+    };
     const cleanupDoodle = initializeDoodle();
 
     // Animate cards after hero text animation completes
@@ -811,11 +883,13 @@ export default function HomePage() {
   return (
     <LayoutGroup id="upload-shared-polaroid">
       {/* Doodle Canvas */}
-      <canvas
-        ref={canvasRef}
-        id="doodle-canvas"
-        className="pointer-events-none absolute top-0 left-0 z-40 opacity-100 transition-opacity duration-300"
-      />
+      <div className="pointer-events-none fixed inset-0 z-40 touch-none overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          id="doodle-canvas"
+          className="pointer-events-none absolute top-0 left-0 opacity-100 transition-opacity duration-300 will-change-transform"
+        />
+      </div>
 
       <header className="fixed top-0 z-50 flex h-14 w-full items-center justify-center border-b border-stone-100/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-stone-800/50 dark:bg-stone-950/70 dark:shadow-none">
         <div className="flex w-full max-w-6xl items-center justify-between px-12">
@@ -1034,264 +1108,240 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Your Turn Section */}
-      <section
-        className="relative flex min-h-screen w-full items-center justify-center overflow-hidden border-t border-stone-100 bg-white px-12 py-20 dark:border-stone-800 dark:bg-stone-950"
-        id="your-turn"
-      >
-        <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden opacity-70">
-          <h2 className="text-center font-sans text-[clamp(7rem,18vw,18rem)] leading-[0.8] font-black -tracking-widest text-stone-900 uppercase dark:text-stone-100">
-            Your Turn
-          </h2>
-        </div>
-
-        <div className="relative z-10 flex flex-col items-center gap-6">
-          <button
-            className="group relative flex cursor-pointer flex-col items-center"
+      {/* Participation wrapper (animation stage) */}
+      <div ref={wrapperRef} className="relative z-10 w-full">
+        {uploadPreviewUrl ? (
+          <motion.button
             type="button"
             onClick={() => uploadInputRef.current?.click()}
+            className="group absolute z-40 flex cursor-pointer flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5"
+            style={{
+              ...floatingPolaroidStyle,
+              opacity: stageGeometry.start ? 1 : 0,
+            }}
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.99 }}
           >
-            <AnimatePresence mode="wait">
-              {!showPolaroidInContact ? (
-                <motion.div
-                  key="hero-polaroid"
-                  layoutId="shared-upload-polaroid"
-                  transition={{ type: "spring", stiffness: 240, damping: 30 }}
-                  className="your-turn-polaroid-card flex flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-500 group-hover:scale-[1.02] group-hover:-rotate-1"
-                  style={{
-                    width: "520px",
-                    height: "520px",
-                    transform: "rotate(1.5deg)",
-                  }}
-                >
-                  <div className="relative grow overflow-hidden bg-stone-50">
-                    {uploadPreviewUrl ? (
-                      <Image
-                        src={uploadPreviewUrl}
-                        alt="Uploaded preview"
-                        fill
-                        unoptimized
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03),transparent_55%)]">
-                        <span className="material-symbols-outlined text-6xl text-stone-200 transition-colors duration-500 group-hover:text-amber-500/60">
-                          add_photo_alternate
-                        </span>
-                      </div>
-                    )}
-                  </div>
+            <div className="relative grow overflow-hidden bg-stone-50">
+              <Image
+                src={uploadPreviewUrl}
+                alt="Uploaded preview"
+                fill
+                unoptimized
+                className="h-full w-full object-cover"
+              />
+            </div>
 
-                  <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
-                    <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
-                      New Perspective
-                    </span>
-                    <span className="font-sans text-[1.1rem] font-normal tracking-[-0.04em] text-stone-500 uppercase transition-colors duration-500 group-hover:text-stone-900">
-                      {uploadPreviewUrl
-                        ? contributionTitle
-                        : "Click to contribute"}
-                    </span>
-                  </div>
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
+            <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
+              <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
+                New Perspective
+              </span>
+              <span className="font-sans text-[1.1rem] font-normal tracking-[-0.04em] text-stone-500 uppercase transition-colors duration-500 group-hover:text-stone-900">
+                {contributionTitle}
+              </span>
+            </div>
+          </motion.button>
+        ) : null}
 
-            <input
-              ref={uploadInputRef}
-              accept="image/*"
-              className="hidden"
-              type="file"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (!file) return;
+        <section
+          className="relative flex min-h-screen w-full items-center justify-center overflow-hidden border-t border-stone-100 bg-white px-12 py-20 dark:border-stone-800 dark:bg-stone-950"
+          id="your-turn"
+        >
+          <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden opacity-70">
+            <h2 className="text-center font-sans text-[clamp(7rem,18vw,18rem)] leading-[0.8] font-black -tracking-widest text-stone-900 uppercase dark:text-stone-100">
+              Your Turn
+            </h2>
+          </div>
 
-                const nextUrl = URL.createObjectURL(file);
-                setUploadPreviewUrl(nextUrl);
-                setUploadFile(file);
-                setContributionTitle("What do you see?");
-                setPendingTitle("");
-                setContactRevealStep(0);
-                setTitleModalOpen(true);
-                setContactStatus("idle");
-                setContactMessage("");
-              }}
-            />
-          </button>
-        </div>
-      </section>
+          <div
+            ref={yourTurnPlaceholderRef}
+            className="pointer-events-none absolute top-1/2 left-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 opacity-0"
+            aria-hidden="true"
+          />
 
-      {/* Contact Section */}
-      <section
-        ref={contactSectionRef}
-        className={`relative w-full overflow-hidden bg-white px-6 transition-all duration-700 ease-out dark:bg-stone-950 ${
-          uploadPreviewUrl
-            ? "max-h-[1200px] py-16 opacity-100"
-            : "max-h-0 py-0 opacity-0"
-        }`}
-        id="contact"
-      >
-        <div className="pointer-events-none absolute inset-0 overflow-hidden select-none">
-          <motion.div
-            className={`absolute top-8 left-1/2 -translate-x-1/2 font-sans text-[clamp(5rem,20vw,16rem)] leading-[0.8] font-black tracking-[-0.07em] text-stone-900 uppercase transition-all duration-700 ${
-              contactRevealStep >= 1 ? "opacity-70" : "translate-y-6 opacity-0"
-            }`}
-            initial={{ opacity: 0, y: 20 }}
-            animate={
-              contactRevealStep >= 1
-                ? { opacity: 0.7, y: 0 }
-                : { opacity: 0, y: 20 }
-            }
-            transition={{ duration: 0.6, ease: "easeOut" }}
-          >
-            GET IN
-          </motion.div>
-          <motion.div
-            className={`absolute bottom-2 left-1/2 -translate-x-1/2 font-sans text-[clamp(5rem,20vw,16rem)] leading-[0.8] font-black tracking-[-0.07em] text-stone-900 uppercase transition-all duration-700 ${
-              contactRevealStep >= 1 ? "opacity-70" : "-translate-y-6 opacity-0"
-            }`}
-            initial={{ opacity: 0, y: -20 }}
-            animate={
-              contactRevealStep >= 1
-                ? { opacity: 0.7, y: 0 }
-                : { opacity: 0, y: -20 }
-            }
-            transition={{ duration: 0.6, ease: "easeOut", delay: 0.08 }}
-          >
-            TOUCH
-          </motion.div>
-        </div>
-
-        <div className="relative mx-auto grid w-full max-w-6xl items-start gap-12 md:grid-cols-[340px_1fr]">
-          <motion.div
-            className={`justify-self-center transition-all duration-700 ease-out md:justify-self-start ${
-              contactRevealStep >= 2
-                ? "translate-y-0 opacity-100"
-                : "-translate-y-14 opacity-0"
-            }`}
-            initial={{ opacity: 0, y: -40 }}
-            animate={
-              contactRevealStep >= 2
-                ? { opacity: 1, y: 0 }
-                : { opacity: 0, y: -40 }
-            }
-            transition={{ duration: 0.55, ease: "easeOut" }}
-          >
-            <AnimatePresence>
-              {showPolaroidInContact ? (
-                <motion.div
-                  key="contact-polaroid"
-                  layoutId="shared-upload-polaroid"
-                  transition={{ type: "spring", stiffness: 240, damping: 30 }}
-                  className="w-[300px] rotate-[-3deg] bg-white p-3 pb-14 shadow-[0_20px_58px_rgba(0,0,0,0.18)] ring-1 ring-black/5"
-                >
-                  <div className="relative h-[320px] overflow-hidden bg-stone-200">
-                    {uploadPreviewUrl ? (
-                      <Image
-                        src={uploadPreviewUrl}
-                        alt="Uploaded contact preview"
-                        fill
-                        unoptimized
-                        className="h-full w-full object-cover"
-                      />
-                    ) : null}
-                  </div>
-                  <div className="mt-4 h-[2px] w-24 bg-amber-300/70" />
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-          </motion.div>
-
-          <motion.form
-            className={`rounded-[24px] border border-stone-300/85 bg-white/78 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.08)] backdrop-blur-sm transition-all duration-700 ease-out md:p-8 dark:border-stone-700 dark:bg-stone-950/70 ${
-              contactRevealStep >= 3
-                ? "translate-y-0 opacity-100"
-                : "translate-y-10 opacity-0"
-            }`}
-            onSubmit={handleContactSubmit}
-            initial={{ opacity: 0, y: 30 }}
-            animate={
-              contactRevealStep >= 3
-                ? { opacity: 1, y: 0 }
-                : { opacity: 0, y: 30 }
-            }
-            transition={{ duration: 0.6, ease: "easeOut" }}
-          >
-            <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="font-metadata-caps text-[10px] tracking-[0.32em] text-amber-600 uppercase">
-                  Collaborate
-                </p>
-                <h3 className="font-section-cursive mt-1 text-[clamp(2.8rem,8vw,5.2rem)] leading-[0.86] text-stone-600 dark:text-stone-200">
-                  Connect
-                </h3>
+          {!uploadPreviewUrl ? (
+            <button
+              type="button"
+              onClick={() => uploadInputRef.current?.click()}
+              className="group relative z-10 flex h-[520px] w-[520px] max-w-[82vw] cursor-pointer flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-300 hover:scale-[1.01] hover:rotate-1 active:scale-[0.99]"
+            >
+              <div className="relative grow overflow-hidden bg-stone-50">
+                <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03),transparent_55%)]">
+                  <span className="material-symbols-outlined text-6xl text-stone-200 transition-colors duration-500 group-hover:text-amber-500/60">
+                    add_photo_alternate
+                  </span>
+                </div>
               </div>
-            </div>
 
-            <div className="grid gap-8">
-              <label className="space-y-2">
-                <span className="font-metadata-caps text-[10px] tracking-[0.28em] text-stone-400 uppercase">
-                  Name
+              <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
+                <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
+                  New Perspective
                 </span>
-                <input
-                  value={contactName}
-                  onChange={(event) => setContactName(event.target.value)}
-                  placeholder="Your name"
-                  className="w-full rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2.1rem] leading-[1] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
-                />
-              </label>
-
-              <label className="space-y-2">
-                <span className="font-metadata-caps text-[10px] tracking-[0.28em] text-stone-400 uppercase">
-                  Note
+                <span className="font-sans text-[1.1rem] font-normal tracking-[-0.04em] text-stone-500 uppercase transition-colors duration-500 group-hover:text-stone-900">
+                  Click to contribute
                 </span>
-                <textarea
-                  value={contactNote}
-                  onChange={(event) => setContactNote(event.target.value)}
-                  placeholder="A short note about collaboration or anything else"
-                  rows={5}
-                  className="w-full resize-none rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2rem] leading-[1.2] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
-                />
-              </label>
+              </div>
+            </button>
+          ) : null}
+
+          <input
+            ref={uploadInputRef}
+            accept="image/*"
+            className="hidden"
+            type="file"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+
+              const nextUrl = URL.createObjectURL(file);
+              setUploadPreviewUrl(nextUrl);
+              setUploadFile(file);
+              setContributionTitle("What do you see?");
+              setPendingTitle("");
+              setTitleModalOpen(true);
+              setContactRevealStarted(false);
+              setContactStatus("idle");
+              setContactMessage("");
+            }}
+          />
+        </section>
+
+        <section
+          ref={contactSectionRef}
+          className={`relative w-full overflow-hidden bg-white px-6 transition-[max-height,padding,opacity] duration-700 ease-out dark:bg-stone-950 ${
+            contactRevealStarted
+              ? "max-h-[1400px] py-16 opacity-100"
+              : "max-h-0 py-0 opacity-0"
+          }`}
+          id="contact"
+          aria-hidden={!contactRevealStarted}
+        >
+          <div className="pointer-events-none absolute inset-0 overflow-hidden select-none">
+            <motion.div
+              className="absolute top-8 left-1/2 -translate-x-1/2 font-sans text-[clamp(5rem,20vw,16rem)] leading-[0.8] font-black tracking-[-0.07em] text-stone-900 uppercase"
+              initial={false}
+              animate={{
+                opacity: contactRevealStarted ? 0.72 : 0,
+                y: contactRevealStarted ? 0 : 18,
+              }}
+              transition={{ duration: 0.65, ease: "easeOut" }}
+            >
+              GET IN
+            </motion.div>
+            <motion.div
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 font-sans text-[clamp(5rem,20vw,16rem)] leading-[0.8] font-black tracking-[-0.07em] text-stone-900 uppercase"
+              initial={false}
+              animate={{
+                opacity: contactRevealStarted ? 0.72 : 0,
+                y: contactRevealStarted ? 0 : 18,
+              }}
+              transition={{ duration: 0.65, ease: "easeOut", delay: 0.12 }}
+            >
+              TOUCH
+            </motion.div>
+          </div>
+
+          <div className="relative mx-auto grid w-full max-w-6xl items-start gap-12 md:grid-cols-[340px_1fr]">
+            <div className="justify-self-center md:justify-self-start">
+              <div
+                ref={contactPlaceholderRef}
+                className="pointer-events-none h-[320px] w-[300px] rotate-[-3deg] opacity-0"
+                aria-hidden="true"
+              />
             </div>
 
-            <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-              <p className="font-sans text-xs text-stone-500 dark:text-stone-400">
-                {contactStatus === "sent"
-                  ? "Message sent."
-                  : "Your uploaded photo will be attached automatically."}
-              </p>
+            <motion.form
+              className="rounded-[24px] border border-stone-300/85 bg-white/78 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.08)] backdrop-blur-sm md:p-8 dark:border-stone-700 dark:bg-stone-950/70"
+              onSubmit={handleContactSubmit}
+              initial={false}
+              animate={{
+                opacity: contactRevealStarted ? 1 : 0,
+                y: contactRevealStarted ? 0 : 28,
+              }}
+              transition={{ duration: 0.65, ease: "easeOut", delay: 0.7 }}
+            >
+              <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="font-metadata-caps text-[10px] tracking-[0.32em] text-amber-600 uppercase">
+                    Collaborate
+                  </p>
+                  <h3 className="font-section-cursive mt-1 text-[clamp(2.8rem,8vw,5.2rem)] leading-[0.86] text-stone-600 dark:text-stone-200">
+                    Connect
+                  </h3>
+                </div>
+              </div>
 
-              <button
-                type="submit"
-                disabled={!canSendContact || contactStatus === "sending"}
-                className="font-metadata-caps rounded-full border border-stone-300 bg-white/80 px-9 py-4 text-[12px] tracking-[0.34em] text-stone-600 uppercase transition-transform duration-200 hover:-translate-y-0.5 hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-              >
-                {contactStatus === "sending" ? "Sending" : "Send  ->"}
-              </button>
-            </div>
+              <div className="grid gap-8">
+                <label className="space-y-2">
+                  <span className="font-metadata-caps text-[10px] tracking-[0.28em] text-stone-400 uppercase">
+                    Name
+                  </span>
+                  <input
+                    value={contactName}
+                    onChange={(event) => setContactName(event.target.value)}
+                    placeholder="Your name"
+                    className="w-full rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2.1rem] leading-[1] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
+                  />
+                </label>
 
-            {contactMessage ? (
-              <p
-                className={`mt-3 font-sans text-sm ${
-                  contactStatus === "sent"
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-rose-600 dark:text-rose-400"
-                }`}
-              >
-                {contactMessage}
-              </p>
-            ) : null}
-          </motion.form>
-        </div>
-      </section>
+                <label className="space-y-2">
+                  <span className="font-metadata-caps text-[10px] tracking-[0.28em] text-stone-400 uppercase">
+                    Note
+                  </span>
+                  <textarea
+                    value={contactNote}
+                    onChange={(event) => setContactNote(event.target.value)}
+                    placeholder="A short note about collaboration or anything else"
+                    rows={5}
+                    className="w-full resize-none rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2rem] leading-[1.2] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+                <p className="font-sans text-xs text-stone-500 dark:text-stone-400">
+                  {contactStatus === "sent"
+                    ? "Message sent."
+                    : "Your uploaded photo will be attached automatically."}
+                </p>
+
+                <button
+                  type="submit"
+                  disabled={!canSendContact || contactStatus === "sending"}
+                  className="font-metadata-caps rounded-full border border-stone-300 bg-white/80 px-9 py-4 text-[12px] tracking-[0.34em] text-stone-600 uppercase transition-transform duration-200 hover:-translate-y-0.5 hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+                >
+                  {contactStatus === "sending" ? "Sending" : "Send  ->"}
+                </button>
+              </div>
+
+              {contactMessage ? (
+                <p
+                  className={`mt-3 font-sans text-sm ${
+                    contactStatus === "sent"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}
+                >
+                  {contactMessage}
+                </p>
+              ) : null}
+            </motion.form>
+          </div>
+        </section>
+      </div>
 
       {titleModalOpen ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 p-4 backdrop-blur-sm">
+        <motion.div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 p-4 backdrop-blur-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.28, ease: "easeOut" }}
+        >
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
+            initial={{ y: 18, scale: 0.96, opacity: 0 }}
+            animate={{ y: 0, scale: 1, opacity: 1 }}
             exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
+            transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
             className="w-full max-w-sm rounded-2xl border border-stone-200/60 bg-white/95 p-7 shadow-[0_12px_48px_rgba(0,0,0,0.12)] backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/95"
           >
             <p className="font-metadata-caps text-[9px] tracking-[0.28em] text-amber-600 uppercase">
@@ -1301,7 +1351,7 @@ export default function HomePage() {
               Name this
             </h3>
             <p className="mt-3 font-sans text-[13px] leading-relaxed text-stone-500 dark:text-stone-400">
-              Leave empty for "What do you see?"
+              Leave empty for &quot;What do you see?&quot;
             </p>
 
             <input
@@ -1342,7 +1392,7 @@ export default function HomePage() {
               </button>
             </div>
           </motion.div>
-        </div>
+        </motion.div>
       ) : null}
 
       {/* Footer */}
