@@ -3,9 +3,9 @@ import nodemailer from "nodemailer";
 
 export const runtime = "nodejs";
 
-const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 8 * 1024 * 1024; // 8MB
 
-function getFormValue(formData: FormData, key: string) {
+function getFormValue(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
 }
@@ -15,8 +15,8 @@ function getSmtpConfig() {
   const port = process.env.SMTP_PORT;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  const fromEmail = process.env.CONTACT_FROM_EMAIL;
-  const toEmail = process.env.CONTACT_TO_EMAIL;
+  const fromEmail = process.env.CONTACT_FROM_EMAIL ?? process.env.SMTP_USER;
+  const toEmail = process.env.CONTACT_TO_EMAIL ?? process.env.CONTACT_TO;
 
   if (!host || !port || !user || !pass || !fromEmail || !toEmail) {
     return null;
@@ -116,7 +116,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ message: "Your polaroid note was sent." });
-  } catch {
+  } catch (err) {
     return NextResponse.json(
       { error: "Unable to send your message right now." },
       { status: 500 },

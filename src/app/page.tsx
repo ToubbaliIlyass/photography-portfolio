@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 
 // Type definitions
 interface PortfolioItem {
@@ -59,12 +60,150 @@ const PORTFOLIO_ITEMS: PortfolioItem[] = [
 export default function HomePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const contactSectionRef = useRef<HTMLElement>(null);
+  const revealTimeoutsRef = useRef<number[]>([]);
   const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [contributionTitle, setContributionTitle] =
+    useState("What do you see?");
+  const [titleModalOpen, setTitleModalOpen] = useState(false);
+  const [pendingTitle, setPendingTitle] = useState("");
+  const [contactRevealStep, setContactRevealStep] = useState(0);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [contactName, setContactName] = useState("");
+  const [contactNote, setContactNote] = useState("");
+  const [contactStatus, setContactStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
+  const [contactMessage, setContactMessage] = useState("");
 
   useEffect(() => {
     if (!uploadPreviewUrl) return;
 
     return () => URL.revokeObjectURL(uploadPreviewUrl);
+  }, [uploadPreviewUrl]);
+
+  const canSendContact =
+    Boolean(uploadPreviewUrl) &&
+    Boolean(uploadFile) &&
+    contactName.trim().length > 0 &&
+    contactNote.trim().length > 0;
+  const showPolaroidInContact =
+    Boolean(uploadPreviewUrl) && contactRevealStep >= 2;
+
+  const handleContactSubmit = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+
+    if (!canSendContact || !uploadFile) {
+      setContactStatus("error");
+      setContactMessage("Add your name, a note, and a photo first.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("title", contributionTitle.trim() || "What do you see?");
+    formData.append("name", contactName.trim());
+    formData.append("note", contactNote.trim());
+    formData.append("image", uploadFile);
+
+    setContactStatus("sending");
+    setContactMessage("");
+
+    try {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        message?: string;
+      };
+
+      if (!response.ok) {
+        setContactStatus("error");
+        setContactMessage(data.error ?? "Something went wrong.");
+        return;
+      }
+
+      setContactStatus("sent");
+      setContactMessage(data.message ?? "Sent. I'll see it in my inbox.");
+      setContactName("");
+      setContactNote("");
+    } catch {
+      setContactStatus("error");
+      setContactMessage("Could not send right now. Try again later.");
+    }
+  };
+
+  const clearRevealTimers = () => {
+    revealTimeoutsRef.current.forEach((id) => window.clearTimeout(id));
+    revealTimeoutsRef.current = [];
+  };
+
+  const beginContactReveal = (nextTitle: string) => {
+    setContributionTitle(nextTitle.trim() || "What do you see?");
+    setTitleModalOpen(false);
+    clearRevealTimers();
+    setContactRevealStep(1); // Start at step 1 on scroll
+
+    contactSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  useEffect(() => {
+    return () => clearRevealTimers();
+  }, []);
+
+  // Scroll-triggered animation effect
+  useEffect(() => {
+    if (!uploadPreviewUrl) {
+      setScrollProgress(0);
+      setContactRevealStep(0);
+      return;
+    }
+
+    const handleScroll = () => {
+      const section = contactSectionRef.current;
+      if (!section) return;
+
+      const sectionRect = section.getBoundingClientRect();
+      const windowHeight = window.innerHeight;
+
+      // Calculate progress: 0 when section is below viewport, 1 when fully visible
+      const sectionTop = sectionRect.top;
+      const sectionHeight = sectionRect.height;
+
+      // Section starts revealing when its top enters viewport
+      let progress = 0;
+      if (sectionTop < windowHeight && sectionTop + sectionHeight > 0) {
+        progress = Math.max(
+          0,
+          Math.min(
+            1,
+            (windowHeight - sectionTop) / (windowHeight + sectionHeight),
+          ),
+        );
+      }
+
+      setScrollProgress(progress);
+
+      // Staggered reveal based on scroll progress
+      if (progress < 0.2) {
+        setContactRevealStep(1); // Background text visible
+      } else if (progress < 0.5) {
+        setContactRevealStep(2); // Polaroid visible
+      } else {
+        setContactRevealStep(3); // Form visible
+      }
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, [uploadPreviewUrl]);
 
   useEffect(() => {
@@ -670,7 +809,7 @@ export default function HomePage() {
   }, []);
 
   return (
-    <>
+    <LayoutGroup id="upload-shared-polaroid">
       {/* Doodle Canvas */}
       <canvas
         ref={canvasRef}
@@ -912,41 +1051,50 @@ export default function HomePage() {
             type="button"
             onClick={() => uploadInputRef.current?.click()}
           >
-            <div
-              className="your-turn-polaroid-card flex flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-500 group-hover:scale-[1.02] group-hover:-rotate-1"
-              style={{
-                width: "520px",
-                height: "520px",
-                transform: "rotate(1.5deg)",
-              }}
-            >
-              <div className="relative grow overflow-hidden bg-stone-50">
-                {uploadPreviewUrl ? (
-                  <Image
-                    src={uploadPreviewUrl}
-                    alt="Uploaded preview"
-                    fill
-                    unoptimized
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03),transparent_55%)]">
-                    <span className="material-symbols-outlined text-6xl text-stone-200 transition-colors duration-500 group-hover:text-amber-500/60">
-                      add_photo_alternate
+            <AnimatePresence mode="wait">
+              {!showPolaroidInContact ? (
+                <motion.div
+                  key="hero-polaroid"
+                  layoutId="shared-upload-polaroid"
+                  transition={{ type: "spring", stiffness: 240, damping: 30 }}
+                  className="your-turn-polaroid-card flex flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-500 group-hover:scale-[1.02] group-hover:-rotate-1"
+                  style={{
+                    width: "520px",
+                    height: "520px",
+                    transform: "rotate(1.5deg)",
+                  }}
+                >
+                  <div className="relative grow overflow-hidden bg-stone-50">
+                    {uploadPreviewUrl ? (
+                      <Image
+                        src={uploadPreviewUrl}
+                        alt="Uploaded preview"
+                        fill
+                        unoptimized
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03),transparent_55%)]">
+                        <span className="material-symbols-outlined text-6xl text-stone-200 transition-colors duration-500 group-hover:text-amber-500/60">
+                          add_photo_alternate
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
+                    <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
+                      New Perspective
+                    </span>
+                    <span className="font-sans text-[1.1rem] font-normal tracking-[-0.04em] text-stone-500 uppercase transition-colors duration-500 group-hover:text-stone-900">
+                      {uploadPreviewUrl
+                        ? contributionTitle
+                        : "Click to contribute"}
                     </span>
                   </div>
-                )}
-              </div>
-
-              <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
-                <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
-                  New Perspective
-                </span>
-                <span className="font-sans text-[1.1rem] font-black tracking-[-0.06em] text-stone-400 uppercase transition-colors duration-500 group-hover:text-stone-900">
-                  Click to contribute
-                </span>
-              </div>
-            </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
 
             <input
               ref={uploadInputRef}
@@ -959,11 +1107,243 @@ export default function HomePage() {
 
                 const nextUrl = URL.createObjectURL(file);
                 setUploadPreviewUrl(nextUrl);
+                setUploadFile(file);
+                setContributionTitle("What do you see?");
+                setPendingTitle("");
+                setContactRevealStep(0);
+                setTitleModalOpen(true);
+                setContactStatus("idle");
+                setContactMessage("");
               }}
             />
           </button>
         </div>
       </section>
+
+      {/* Contact Section */}
+      <section
+        ref={contactSectionRef}
+        className={`relative w-full overflow-hidden bg-white px-6 transition-all duration-700 ease-out dark:bg-stone-950 ${
+          uploadPreviewUrl
+            ? "max-h-[1200px] py-16 opacity-100"
+            : "max-h-0 py-0 opacity-0"
+        }`}
+        id="contact"
+      >
+        <div className="pointer-events-none absolute inset-0 overflow-hidden select-none">
+          <motion.div
+            className={`absolute top-8 left-1/2 -translate-x-1/2 font-sans text-[clamp(5rem,20vw,16rem)] leading-[0.8] font-black tracking-[-0.07em] text-stone-900 uppercase transition-all duration-700 ${
+              contactRevealStep >= 1 ? "opacity-70" : "translate-y-6 opacity-0"
+            }`}
+            initial={{ opacity: 0, y: 20 }}
+            animate={
+              contactRevealStep >= 1
+                ? { opacity: 0.7, y: 0 }
+                : { opacity: 0, y: 20 }
+            }
+            transition={{ duration: 0.6, ease: "easeOut" }}
+          >
+            GET IN
+          </motion.div>
+          <motion.div
+            className={`absolute bottom-2 left-1/2 -translate-x-1/2 font-sans text-[clamp(5rem,20vw,16rem)] leading-[0.8] font-black tracking-[-0.07em] text-stone-900 uppercase transition-all duration-700 ${
+              contactRevealStep >= 1 ? "opacity-70" : "-translate-y-6 opacity-0"
+            }`}
+            initial={{ opacity: 0, y: -20 }}
+            animate={
+              contactRevealStep >= 1
+                ? { opacity: 0.7, y: 0 }
+                : { opacity: 0, y: -20 }
+            }
+            transition={{ duration: 0.6, ease: "easeOut", delay: 0.08 }}
+          >
+            TOUCH
+          </motion.div>
+        </div>
+
+        <div className="relative mx-auto grid w-full max-w-6xl items-start gap-12 md:grid-cols-[340px_1fr]">
+          <motion.div
+            className={`justify-self-center transition-all duration-700 ease-out md:justify-self-start ${
+              contactRevealStep >= 2
+                ? "translate-y-0 opacity-100"
+                : "-translate-y-14 opacity-0"
+            }`}
+            initial={{ opacity: 0, y: -40 }}
+            animate={
+              contactRevealStep >= 2
+                ? { opacity: 1, y: 0 }
+                : { opacity: 0, y: -40 }
+            }
+            transition={{ duration: 0.55, ease: "easeOut" }}
+          >
+            <AnimatePresence>
+              {showPolaroidInContact ? (
+                <motion.div
+                  key="contact-polaroid"
+                  layoutId="shared-upload-polaroid"
+                  transition={{ type: "spring", stiffness: 240, damping: 30 }}
+                  className="w-[300px] rotate-[-3deg] bg-white p-3 pb-14 shadow-[0_20px_58px_rgba(0,0,0,0.18)] ring-1 ring-black/5"
+                >
+                  <div className="relative h-[320px] overflow-hidden bg-stone-200">
+                    {uploadPreviewUrl ? (
+                      <Image
+                        src={uploadPreviewUrl}
+                        alt="Uploaded contact preview"
+                        fill
+                        unoptimized
+                        className="h-full w-full object-cover"
+                      />
+                    ) : null}
+                  </div>
+                  <div className="mt-4 h-[2px] w-24 bg-amber-300/70" />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </motion.div>
+
+          <motion.form
+            className={`rounded-[24px] border border-stone-300/85 bg-white/78 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.08)] backdrop-blur-sm transition-all duration-700 ease-out md:p-8 dark:border-stone-700 dark:bg-stone-950/70 ${
+              contactRevealStep >= 3
+                ? "translate-y-0 opacity-100"
+                : "translate-y-10 opacity-0"
+            }`}
+            onSubmit={handleContactSubmit}
+            initial={{ opacity: 0, y: 30 }}
+            animate={
+              contactRevealStep >= 3
+                ? { opacity: 1, y: 0 }
+                : { opacity: 0, y: 30 }
+            }
+            transition={{ duration: 0.6, ease: "easeOut" }}
+          >
+            <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="font-metadata-caps text-[10px] tracking-[0.32em] text-amber-600 uppercase">
+                  Collaborate
+                </p>
+                <h3 className="font-section-cursive mt-1 text-[clamp(2.8rem,8vw,5.2rem)] leading-[0.86] text-stone-600 dark:text-stone-200">
+                  Connect
+                </h3>
+              </div>
+            </div>
+
+            <div className="grid gap-8">
+              <label className="space-y-2">
+                <span className="font-metadata-caps text-[10px] tracking-[0.28em] text-stone-400 uppercase">
+                  Name
+                </span>
+                <input
+                  value={contactName}
+                  onChange={(event) => setContactName(event.target.value)}
+                  placeholder="Your name"
+                  className="w-full rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2.1rem] leading-[1] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="font-metadata-caps text-[10px] tracking-[0.28em] text-stone-400 uppercase">
+                  Note
+                </span>
+                <textarea
+                  value={contactNote}
+                  onChange={(event) => setContactNote(event.target.value)}
+                  placeholder="A short note about collaboration or anything else"
+                  rows={5}
+                  className="w-full resize-none rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2rem] leading-[1.2] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
+                />
+              </label>
+            </div>
+
+            <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+              <p className="font-sans text-xs text-stone-500 dark:text-stone-400">
+                {contactStatus === "sent"
+                  ? "Message sent."
+                  : "Your uploaded photo will be attached automatically."}
+              </p>
+
+              <button
+                type="submit"
+                disabled={!canSendContact || contactStatus === "sending"}
+                className="font-metadata-caps rounded-full border border-stone-300 bg-white/80 px-9 py-4 text-[12px] tracking-[0.34em] text-stone-600 uppercase transition-transform duration-200 hover:-translate-y-0.5 hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+              >
+                {contactStatus === "sending" ? "Sending" : "Send  ->"}
+              </button>
+            </div>
+
+            {contactMessage ? (
+              <p
+                className={`mt-3 font-sans text-sm ${
+                  contactStatus === "sent"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-rose-600 dark:text-rose-400"
+                }`}
+              >
+                {contactMessage}
+              </p>
+            ) : null}
+          </motion.form>
+        </div>
+      </section>
+
+      {titleModalOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 p-4 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className="w-full max-w-sm rounded-2xl border border-stone-200/60 bg-white/95 p-7 shadow-[0_12px_48px_rgba(0,0,0,0.12)] backdrop-blur-sm dark:border-stone-800/60 dark:bg-stone-950/95"
+          >
+            <p className="font-metadata-caps text-[9px] tracking-[0.28em] text-amber-600 uppercase">
+              Optional
+            </p>
+            <h3 className="font-section-cursive mt-1 text-[2.4rem] leading-[1] text-stone-900 dark:text-stone-100">
+              Name this
+            </h3>
+            <p className="mt-3 font-sans text-[13px] leading-relaxed text-stone-500 dark:text-stone-400">
+              Leave empty for "What do you see?"
+            </p>
+
+            <input
+              value={pendingTitle}
+              onChange={(event) => setPendingTitle(event.target.value)}
+              placeholder="Type a title"
+              className="mt-5 w-full rounded-lg border border-stone-200/70 bg-white/50 px-4 py-2.5 font-sans text-sm text-stone-900 transition-all outline-none placeholder:text-stone-400 focus:border-amber-400/50 focus:bg-white dark:border-stone-700/70 dark:bg-stone-950/50 dark:text-stone-100 dark:focus:border-amber-500/50"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const trimmedTitle = pendingTitle.trim();
+                  beginContactReveal(trimmedTitle || "What do you see?");
+                }
+              }}
+            />
+
+            <div className="mt-6 flex justify-end gap-2.5">
+              <button
+                type="button"
+                className="font-metadata-caps rounded-lg border border-stone-200/70 px-4 py-2 text-[9px] tracking-[0.24em] text-stone-600 uppercase transition-all hover:border-stone-400/70 hover:bg-stone-50/50 dark:border-stone-700/70 dark:text-stone-300 dark:hover:border-stone-600/70"
+                onClick={() => {
+                  setContributionTitle("What do you see?");
+                  setPendingTitle("");
+                  beginContactReveal("What do you see?");
+                }}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                className="font-metadata-caps rounded-lg bg-stone-900 px-4 py-2 text-[9px] tracking-[0.24em] text-white uppercase transition-all hover:bg-stone-800 active:scale-95 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                onClick={() => {
+                  const trimmedTitle = pendingTitle.trim();
+                  beginContactReveal(trimmedTitle || "What do you see?");
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      ) : null}
 
       {/* Footer */}
       <footer className="mt-auto mb-8 flex w-full flex-col items-center gap-6 bg-transparent py-12">
@@ -1095,6 +1475,6 @@ export default function HomePage() {
           </span>
         </button>
       </div>
-    </>
+    </LayoutGroup>
   );
 }
