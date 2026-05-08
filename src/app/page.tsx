@@ -9,9 +9,48 @@ import {
   LayoutGroup,
   motion,
   useMotionValueEvent,
+  useReducedMotion,
   useScroll,
   useTransform,
+  type MotionValue,
 } from "framer-motion";
+
+const BIO_WORDS = [
+  "I", "photograph", "to", "show", "the", "ordinary",
+  "differently", "using", "details,", "emotion,", "and",
+  "abstraction", "to", "turn", "everyday", "scenes",
+  "into", "meaningful", "stories.",
+] as const;
+
+function WordSpan({
+  word,
+  index,
+  scrollYProgress,
+}: {
+  word: string;
+  index: number;
+  scrollYProgress: MotionValue<number>;
+}) {
+  const reduced = useReducedMotion();
+  const revealWindow = 0.06;
+  const start = 0.10 + (index / (BIO_WORDS.length - 1)) * (0.90 - revealWindow - 0.10);
+  const end = start + revealWindow;
+  const opacity = useTransform(
+    scrollYProgress,
+    [start, end],
+    reduced ? [1, 1] : [0, 1],
+  );
+  const y = useTransform(
+    scrollYProgress,
+    [start, end],
+    reduced ? [0, 0] : [10, 0],
+  );
+  return (
+    <motion.span className="about-word" style={{ opacity, y }}>
+      {word}
+    </motion.span>
+  );
+}
 
 // Type definitions
 interface PortfolioItem {
@@ -67,6 +106,7 @@ export default function HomePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const aboutSectionRef = useRef<HTMLElement>(null);
   const yourTurnPlaceholderRef = useRef<HTMLDivElement>(null);
   const contactPlaceholderRef = useRef<HTMLDivElement>(null);
   const contactSectionRef = useRef<HTMLElement>(null);
@@ -89,10 +129,16 @@ export default function HomePage() {
   const [contactMessage, setContactMessage] = useState("");
   const [contactRevealStarted, setContactRevealStarted] = useState(false);
   const [contactFormVisible, setContactFormVisible] = useState(false);
+  const [cardScale, setCardScale] = useState(1);
 
   const { scrollYProgress } = useScroll({
     target: wrapperRef,
     offset: ["start start", "end end"],
+  });
+
+  const { scrollYProgress: aboutScrollProgress } = useScroll({
+    target: aboutSectionRef,
+    offset: ["start end", "end start"],
   });
 
   const floatingStartX = stageGeometry.start?.left ?? 0;
@@ -223,6 +269,20 @@ export default function HomePage() {
     return () => clearRevealTimers();
   }, []);
 
+  useEffect(() => {
+    const topCardDesktopWidth = 420 + (PORTFOLIO_ITEMS.length - 1) * 6;
+    const update = () => {
+      if (window.innerWidth < 640) {
+        setCardScale(Math.min(1, (window.innerWidth * 0.82) / topCardDesktopWidth));
+      } else {
+        setCardScale(1);
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
   useMotionValueEvent(scrollYProgress, "change", (latest) => {
     if (!contactRevealStarted) return;
 
@@ -296,20 +356,56 @@ export default function HomePage() {
       let baseRotation = Number(aboutCard.dataset.rotation ?? "0.5");
       let isDragging = false;
       let pendingDragUpdate = false;
+      let tiltX = 0;
+      let tiltY = 0;
+      let pendingTiltUpdate = false;
 
       const applyCardTransform = (
         card: HTMLElement,
         offsetX: number,
         offsetY: number,
         rotation: number,
+        rx = 0,
+        ry = 0,
       ): void => {
-        card.style.transform = `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) rotate(${rotation}deg)`;
+        card.style.transform = `perspective(900px) translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) rotate(${rotation}deg) rotateX(${rx}deg) rotateY(${ry}deg)`;
+      };
+
+      const onTiltMove = (e: MouseEvent): void => {
+        if (isDragging) return;
+        const rect = aboutCard.getBoundingClientRect();
+        const normX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+        const normY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+        tiltX = Math.max(-1, Math.min(1, normY)) * -8;
+        tiltY = Math.max(-1, Math.min(1, normX)) * 8;
+        if (!pendingTiltUpdate) {
+          pendingTiltUpdate = true;
+          requestAnimationFrame(() => {
+            if (!isDragging) {
+              applyCardTransform(aboutCard, baseX, baseY, baseRotation, tiltX, tiltY);
+            }
+            pendingTiltUpdate = false;
+          });
+        }
+      };
+
+      const onTiltLeave = (): void => {
+        if (isDragging) return;
+        tiltX = 0;
+        tiltY = 0;
+        aboutCard.style.transition = "transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)";
+        applyCardTransform(aboutCard, baseX, baseY, baseRotation, 0, 0);
+        setTimeout(() => {
+          if (!isDragging) aboutCard.style.transition = "";
+        }, 600);
       };
 
       const startDrag = (e: MouseEvent | TouchEvent): void => {
         e.preventDefault();
         activeCard = (e.currentTarget ?? e.target) as PolaroidCardElement;
         isDragging = true;
+        tiltX = 0;
+        tiltY = 0;
 
         const clientX =
           "touches" in e && e.touches[0]
@@ -360,7 +456,7 @@ export default function HomePage() {
               const nextX = baseX + moveX;
               const nextY = baseY + moveY;
               const rotation = baseRotation + moveX / 20;
-              applyCardTransform(activeCard, nextX, nextY, rotation);
+              applyCardTransform(activeCard, nextX, nextY, rotation, 0, 0);
             }
             pendingDragUpdate = false;
           });
@@ -376,14 +472,12 @@ export default function HomePage() {
         document.removeEventListener("mouseup", endDrag as EventListener);
         document.removeEventListener("touchend", endDrag as EventListener);
 
-        // Get card dimensions
         const cardRect = activeCard.getBoundingClientRect();
         const cardWidth = cardRect.width;
         const cardHeight = cardRect.height;
         const windowWidth = window.innerWidth;
         const windowHeight = window.innerHeight;
 
-        // Calculate bounds - keep the full card within the viewport
         const maxX = windowWidth / 2 - cardWidth / 2;
         const minX = -windowWidth / 2 + cardWidth / 2;
         const maxY = windowHeight / 2 - cardHeight / 2;
@@ -393,10 +487,13 @@ export default function HomePage() {
         const nextY = Math.max(minY, Math.min(maxY, baseY + moveY));
         const nextRotation = baseRotation + moveX / 20;
 
+        tiltX = 0;
+        tiltY = 0;
+
         activeCard.style.transition =
           "transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)";
         activeCard.style.willChange = "auto";
-        applyCardTransform(activeCard, nextX, nextY, nextRotation);
+        applyCardTransform(activeCard, nextX, nextY, nextRotation, 0, 0);
         activeCard.style.cursor = "grab";
         activeCard.dataset.posX = String(nextX);
         activeCard.dataset.posY = String(nextY);
@@ -414,6 +511,8 @@ export default function HomePage() {
       aboutCard.addEventListener("touchstart", startDrag as EventListener, {
         passive: false,
       });
+      aboutCard.addEventListener("mousemove", onTiltMove);
+      aboutCard.addEventListener("mouseleave", onTiltLeave);
 
       applyCardTransform(aboutCard, baseX, baseY, baseRotation);
     };
@@ -579,6 +678,7 @@ export default function HomePage() {
         }, 500);
 
         cards.forEach((card, index) => {
+          card.style.willChange = "transform, opacity";
           setTimeout(
             () => {
               card.style.transition =
@@ -588,7 +688,12 @@ export default function HomePage() {
               card.style.transform = `translate(-50%, -50%) rotate(${originalRotation})`;
               if (index === cards.length - 1) {
                 currentTopIndex = cards.length - 1;
-                setTimeout(initTopCard, 800);
+                setTimeout(() => {
+                  initTopCard();
+                  cards.forEach((c) => {
+                    c.style.willChange = "auto";
+                  });
+                }, 800);
               }
             },
             (cards.length - 1 - index) * 100,
@@ -599,6 +704,7 @@ export default function HomePage() {
       // Animate cards on initial load
       const animateCardsOnLoad = (): void => {
         cards.forEach((card, index) => {
+          card.style.willChange = "transform, opacity";
           setTimeout(
             () => {
               card.style.transition =
@@ -608,7 +714,12 @@ export default function HomePage() {
               card.style.transform = `translate(-50%, -50%) rotate(${originalRotation})`;
               if (index === cards.length - 1) {
                 currentTopIndex = cards.length - 1;
-                setTimeout(initTopCard, 800);
+                setTimeout(() => {
+                  initTopCard();
+                  cards.forEach((c) => {
+                    c.style.willChange = "auto";
+                  });
+                }, 800);
               }
             },
             (cards.length - 1 - index) * 100,
@@ -616,25 +727,13 @@ export default function HomePage() {
         });
       };
 
-      window.addEventListener("DOMContentLoaded", () => {
-        cards.forEach((card) => {
-          const style = card.getAttribute("style");
-          if (style) {
-            const match = /rotate\((.*?)\)/.exec(style);
-            if (match) card.dataset.originalRotation = match[1];
-          }
-        });
-        initTopCard();
-      });
-
-      // Initialize immediately
+      // Initialize immediately — parse rotation from JSX style and hide cards
       cards.forEach((card) => {
         const style = card.getAttribute("style");
         if (style) {
           const match = /rotate\((.*?)\)/.exec(style);
           if (match) card.dataset.originalRotation = match[1];
         }
-        // Set initial hidden state for cards
         card.style.opacity = "0";
       });
 
@@ -645,10 +744,13 @@ export default function HomePage() {
     // Animate hero text on page load first
     const heroText = document.getElementById("hero-abstract-text");
     if (heroText) {
-      // Trigger the animation by resetting transform to center and opacity to full
+      heroText.style.willChange = "transform, opacity";
       setTimeout(() => {
         heroText.style.transform = "translate(-50%, -50%)";
         heroText.style.opacity = "0.9";
+        setTimeout(() => {
+          heroText.style.willChange = "auto";
+        }, 900);
       }, 50);
     }
 
@@ -886,12 +988,31 @@ export default function HomePage() {
     };
     const cleanupDoodle = initializeDoodle();
 
+    // Mobile about section: IntersectionObserver triggers container fade-in
+    const mobileAbout = document.querySelector<HTMLElement>(".mobile-about-content");
+    let mobileAboutObs: IntersectionObserver | null = null;
+    if (mobileAbout) {
+      mobileAboutObs = new IntersectionObserver(
+        (entries) => {
+          if (entries[0]?.isIntersecting) {
+            mobileAbout.classList.add("is-visible");
+            mobileAboutObs?.disconnect();
+          }
+        },
+        { threshold: 0.25 },
+      );
+      mobileAboutObs.observe(mobileAbout);
+    }
+
     // Animate cards after hero text animation completes
     setTimeout(() => {
       (window as any).animateCardsOnLoad?.();
     }, 1000);
 
-    return cleanupDoodle;
+    return () => {
+      cleanupDoodle();
+      mobileAboutObs?.disconnect();
+    };
   }, []);
 
   return (
@@ -906,11 +1027,11 @@ export default function HomePage() {
       </div>
 
       <header className="fixed top-0 z-50 flex h-14 w-full items-center justify-center border-b border-stone-100/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-stone-800/50 dark:bg-stone-950/70 dark:shadow-none">
-        <div className="flex w-full max-w-6xl items-center justify-between px-12">
+        <div className="flex w-full max-w-6xl items-center justify-between px-4 sm:px-12">
           <div className="font-section-cursive text-2xl text-stone-900 dark:text-stone-100">
             Abstracta
           </div>
-          <nav className="flex gap-8">
+          <nav className="flex gap-4 sm:gap-8">
             <a
               className="border-b border-amber-500 pb-1 text-[10px] font-medium tracking-widest text-stone-900 transition-colors duration-500"
               href="#portfolio"
@@ -934,21 +1055,21 @@ export default function HomePage() {
       </header>
 
       <main
-        className="px-wall-margin relative -m-15 flex min-h-screen flex-col items-center justify-center pt-0 pb-12"
+        className="px-wall-margin relative -m-15 flex min-h-screen flex-col items-center justify-center overflow-hidden pt-0 pb-12"
         id="portfolio"
       >
         {/* Hero Typography Layer */}
         <div
           id="hero-abstract-text"
-          className="pointer-events-none absolute top-1/2 left-1/2 z-20 w-full max-w-6xl px-12 text-center mix-blend-difference"
+          className="pointer-events-none absolute top-1/2 left-1/2 z-20 w-full max-w-6xl px-4 sm:px-12 text-center sm:mix-blend-difference"
           style={{
             transform: "translate(-50%, calc(-50% - 100px))",
             opacity: 0,
             transition:
-              "all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.6s ease-in-out",
+              "transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.6s ease-in-out",
           }}
         >
-          <p className="font-sans text-[clamp(5rem,14vw,14rem)] leading-[0.85] font-black tracking-[-0.08em] text-stone-900 uppercase">
+          <p className="font-sans text-[clamp(2.5rem,14vw,14rem)] leading-[0.85] font-black tracking-[-0.08em] text-[#e8c84a] sm:text-stone-900 uppercase">
             Ordinary
             <br />
             Becomes
@@ -958,23 +1079,28 @@ export default function HomePage() {
         </div>
 
         {/* Polaroid Stack */}
-        <div className="polaroid-stack relative z-10 mt-40 flex h-187.5 w-250 items-center justify-center">
+        <div
+          className="polaroid-stack relative z-10 mt-2 sm:mt-40 flex w-full sm:w-250 items-center justify-center"
+          style={{ height: `${Math.round(750 * cardScale)}px` }}
+        >
           {PORTFOLIO_ITEMS.map((item, index) => {
             const zIndex = index + 1;
-            const width = 420 + index * 6;
-            const height = 520 + index * 6;
-            const offsetX = ((index % 3) - 1) * 12;
-            const offsetY = Math.floor(index / 3) * 8;
+            const width = Math.round((420 + index * 6) * cardScale);
+            const height = Math.round((520 + index * 6) * cardScale);
+            const offsetX = Math.round(((index % 3) - 1) * 12 * cardScale);
+            const offsetY = Math.round(Math.floor(index / 3) * 8 * cardScale);
 
             return (
               <div
                 key={item.id}
-                className="polaroid-card absolute flex origin-center flex-col bg-white p-2.5 pb-14"
+                className="polaroid-card absolute flex origin-center flex-col bg-white"
                 style={{
                   transform: `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) rotate(${item.rotation})`,
                   zIndex: zIndex,
                   width: `${width}px`,
                   height: `${height}px`,
+                  padding: `${Math.round(10 * cardScale)}px`,
+                  paddingBottom: `${Math.round(56 * cardScale)}px`,
                   pointerEvents:
                     index === PORTFOLIO_ITEMS.length - 1 ? "auto" : "none",
                   opacity: 0,
@@ -991,8 +1117,14 @@ export default function HomePage() {
                     unoptimized
                   />
                 </div>
-                <div className="mt-2 flex h-11.5 flex-col items-center justify-center">
-                  <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
+                <div
+                  className="flex flex-col items-center justify-center"
+                  style={{
+                    marginTop: `${Math.round(8 * cardScale)}px`,
+                    height: `${Math.round(46 * cardScale)}px`,
+                  }}
+                >
+                  <span className="font-metadata-caps text-[8px] tracking-widest text-amber-600 uppercase" style={{ marginBottom: `${Math.round(4 * cardScale)}px` }}>
                     Photography
                   </span>
                   <span className="font-polaroid-title text-polaroid-title text-stone-700 italic">
@@ -1022,7 +1154,7 @@ export default function HomePage() {
         </button>
         {/* Instruction Hint */}
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-30 -translate-x-1/2 sm:bottom-10">
-          <span className="font-metadata-caps animate-pulse text-[11px] font-bold tracking-[0.14em] text-stone-800 uppercase sm:text-sm">
+          <span className="font-metadata-caps animate-pulse whitespace-nowrap text-[9px] font-bold tracking-[0.12em] text-stone-800 uppercase sm:text-sm sm:tracking-[0.14em]">
             Drag top card to reveal unique perspectives
           </span>
         </div>
@@ -1030,10 +1162,12 @@ export default function HomePage() {
 
       {/* About Me Section */}
       <section
-        className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-white px-12 py-20 dark:bg-stone-950"
+        ref={aboutSectionRef}
+        className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-white"
         id="about"
       >
-        <div className="absolute inset-0 flex items-center justify-center">
+        {/* Desktop: draggable polaroid + scrolling marquee text */}
+        <div className="hidden sm:flex absolute inset-0 items-center justify-center">
           {/* Draggable About Polaroid */}
           <div
             className="about-polaroid-card absolute flex origin-center cursor-grab flex-col bg-white p-2.5 pb-16 shadow-[0_28px_90px_rgba(0,0,0,0.24)] ring-1 ring-black/5 active:cursor-grabbing"
@@ -1045,6 +1179,7 @@ export default function HomePage() {
               pointerEvents: "auto",
               top: "50%",
               left: "50%",
+              willChange: "transform",
             }}
           >
             <div className="relative grow overflow-hidden bg-stone-50">
@@ -1066,18 +1201,13 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Scrolling Text Below Polaroid */}
+          {/* Scrolling Text */}
           <div className="pointer-events-none absolute inset-x-0 top-1/2 z-0 -translate-y-1/2 overflow-hidden py-12">
             <style>{`
               @keyframes scroll-rtl {
-                0% {
-                  transform: translateX(0);
-                }
-                100% {
-                  transform: translateX(-50%);
-                }
+                0% { transform: translateX(0); }
+                100% { transform: translateX(-50%); }
               }
-              
               .scrolling-text {
                 display: flex;
                 white-space: nowrap;
@@ -1088,33 +1218,85 @@ export default function HomePage() {
                 line-height: 0.92;
                 letter-spacing: -0.08em;
               }
-              
-              .scrolling-text span {
-                padding-right: 6rem;
-              }
+              .scrolling-text span { padding-right: 6rem; }
             `}</style>
             <div className="scrolling-text items-center">
-              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90">
                 I photograph to show the ordinary differently, using details,
                 emotion, and abstraction to turn everyday scenes into meaningful
                 stories.
               </span>
-              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90">
                 I photograph to show the ordinary differently, using details,
                 emotion, and abstraction to turn everyday scenes into meaningful
                 stories.
               </span>
-              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90">
                 I photograph to show the ordinary differently, using details,
                 emotion, and abstraction to turn everyday scenes into meaningful
                 stories.
               </span>
-              <span className="font-sans font-black text-stone-900 uppercase opacity-90 dark:text-stone-100">
+              <span className="font-sans font-black text-stone-900 uppercase opacity-90">
                 I photograph to show the ordinary differently, using details,
                 emotion, and abstraction to turn everyday scenes into meaningful
                 stories.
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Mobile: stacked polaroid + readable bio */}
+        <div className="mobile-about-content sm:hidden flex flex-col items-center gap-10 px-8 py-20 w-full">
+          <div className="about-anim-wrap-label">
+            <span className="font-metadata-caps text-[10px] tracking-[0.3em] text-amber-600 uppercase">
+              About
+            </span>
+          </div>
+
+          <div className="about-anim-wrap-card">
+            <div
+              className="about-polaroid-inner flex flex-col bg-white shadow-[0_20px_60px_rgba(0,0,0,0.16)] ring-1 ring-black/5"
+              style={{
+                width: "min(260px, calc(100vw - 60px))",
+                height: "min(380px, 68dvh)",
+                padding: "10px",
+                paddingBottom: "58px",
+              }}
+            >
+              <div className="relative grow overflow-hidden bg-stone-50">
+                <Image
+                  src="/me.JPG"
+                  alt="Ilyass Toubbali"
+                  fill
+                  className="h-full w-full object-cover"
+                  unoptimized
+                />
+              </div>
+              <div
+                className="flex flex-col items-center justify-center"
+                style={{ marginTop: "8px", height: "48px" }}
+              >
+                <span className="font-metadata-caps text-[8px] tracking-widest text-amber-600 uppercase" style={{ marginBottom: "3px" }}>
+                  Portrait
+                </span>
+                <span className="font-sans text-[0.85rem] tracking-[-0.05em] text-stone-900 uppercase">
+                  Ilyass Toubbali
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="about-anim-wrap-bio">
+            <p className="text-center font-sans text-[1.1rem] font-semibold leading-relaxed text-stone-800 max-w-[280px]">
+              {BIO_WORDS.map((word, i) => (
+                <WordSpan
+                  key={i}
+                  word={word}
+                  index={i}
+                  scrollYProgress={aboutScrollProgress}
+                />
+              ))}
+            </p>
           </div>
         </div>
       </section>
@@ -1155,20 +1337,36 @@ export default function HomePage() {
         ) : null}
 
         <section
-          className="relative flex min-h-screen w-full items-center justify-center overflow-hidden border-t border-stone-100 bg-white px-12 py-20 dark:border-stone-800 dark:bg-stone-950"
+          className="relative flex min-h-screen w-full items-center justify-center overflow-hidden border-t border-stone-100 bg-white px-4 py-16 sm:px-12 sm:py-20 dark:border-stone-800 dark:bg-stone-950"
           id="your-turn"
         >
-          <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden opacity-70">
-            <h2 className="text-center font-sans text-[clamp(9rem,22vw,22rem)] leading-[0.8] font-black -tracking-widest text-stone-900/90 uppercase dark:text-stone-100/90">
+          {/* Desktop: giant watermark behind the upload card */}
+          <div className="hidden sm:flex pointer-events-none absolute inset-0 z-0 items-center justify-center overflow-hidden opacity-70">
+            <h2 className="text-center font-sans text-[clamp(9rem,22vw,22rem)] leading-[0.8] font-black -tracking-widest text-stone-900/90 uppercase">
               Your
               <br />
               Turn
             </h2>
           </div>
 
+          {/* Mobile: YOUR above / TURN below the upload card */}
+          <div className="sm:hidden pointer-events-none absolute inset-0 z-0 flex flex-col items-center overflow-hidden">
+            <div className="flex flex-1 items-end justify-center pb-4">
+              <span className="font-sans text-[5.5rem] font-black tracking-[-0.06em] text-stone-900 uppercase leading-none">
+                YOUR
+              </span>
+            </div>
+            <div className="h-[min(420px,70vw)] w-full flex-shrink-0" />
+            <div className="flex flex-1 items-start justify-center pt-4">
+              <span className="font-sans text-[5.5rem] font-black tracking-[-0.06em] text-stone-900 uppercase leading-none">
+                TURN
+              </span>
+            </div>
+          </div>
+
           <div
             ref={yourTurnPlaceholderRef}
-            className="pointer-events-none absolute top-1/2 left-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 opacity-0"
+            className="pointer-events-none absolute top-1/2 left-1/2 h-[min(420px,70vw)] w-[min(420px,70vw)] -translate-x-1/2 -translate-y-1/2 opacity-0"
             aria-hidden="true"
           />
 
@@ -1176,7 +1374,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => uploadInputRef.current?.click()}
-              className="group relative z-10 flex h-[520px] w-[520px] max-w-[82vw] cursor-pointer flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-300 hover:scale-[1.01] hover:rotate-1 active:scale-[0.99]"
+              className="group relative z-10 flex h-[min(420px,70vw)] w-[min(420px,70vw)] cursor-pointer flex-col bg-white p-2.5 pb-14 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-black/5 transition-transform duration-300 hover:scale-[1.01] hover:rotate-1 active:scale-[0.99]"
             >
               <div className="relative grow overflow-hidden bg-stone-50">
                 <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03),transparent_55%)]">
@@ -1259,7 +1457,7 @@ export default function HomePage() {
             <div className="justify-self-center md:justify-self-start">
               <div
                 ref={contactPlaceholderRef}
-                className="pointer-events-none h-[320px] w-[300px] rotate-[-3deg] opacity-0"
+                className="pointer-events-none h-[min(280px,60vw)] w-[min(260px,60vw)] rotate-[-3deg] opacity-0"
                 aria-hidden="true"
               />
             </div>
@@ -1294,7 +1492,7 @@ export default function HomePage() {
                     value={contactName}
                     onChange={(event) => setContactName(event.target.value)}
                     placeholder="Your name"
-                    className="w-full rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2.1rem] leading-[1] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
+                    className="w-full rounded-none border border-stone-300/90 bg-white/35 px-3 py-3 sm:px-5 sm:py-4 font-sans text-base sm:text-[2.1rem] leading-[1] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
                   />
                 </label>
 
@@ -1307,7 +1505,7 @@ export default function HomePage() {
                     onChange={(event) => setContactNote(event.target.value)}
                     placeholder="A short note about collaboration or anything else"
                     rows={5}
-                    className="w-full resize-none rounded-none border border-stone-300/90 bg-white/35 px-5 py-4 font-sans text-[2rem] leading-[1.2] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
+                    className="w-full resize-none rounded-none border border-stone-300/90 bg-white/35 px-3 py-3 sm:px-5 sm:py-4 font-sans text-base sm:text-[2rem] leading-[1.2] font-semibold tracking-[-0.03em] text-slate-700 transition-colors outline-none placeholder:text-slate-500 focus:border-amber-500/70 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-200"
                   />
                 </label>
               </div>
@@ -1420,10 +1618,10 @@ export default function HomePage() {
       </footer> */}
 
       {/* Doodle Controls Fixed Position */}
-      <div className="fixed right-8 bottom-8 z-50 flex flex-col items-end gap-4">
+      <div className="fixed right-4 bottom-4 sm:right-8 sm:bottom-8 z-50 flex flex-col items-end gap-4">
         {/* Doodle Toolbar (Visible when active) */}
         <div
-          className="hidden translate-y-4 transform flex-col gap-4 rounded-2xl border border-stone-200 bg-white/90 p-4 opacity-0 shadow-2xl backdrop-blur-xl transition-all duration-300"
+          className="hidden translate-y-4 transform flex-col gap-4 rounded-2xl border border-stone-200 bg-white/90 p-3 sm:p-4 opacity-0 shadow-2xl backdrop-blur-xl transition-all duration-300"
           id="doodle-toolbar"
         >
           {/* Color Presets */}
@@ -1528,13 +1726,13 @@ export default function HomePage() {
 
         {/* Main Toggle */}
         <button
-          className="group flex items-center gap-3 rounded-full border border-stone-200 bg-white/80 px-6 py-3 shadow-lg backdrop-blur-xl transition-all hover:border-amber-400 active:scale-95"
+          className="group flex items-center gap-3 rounded-full border border-stone-200 bg-white/80 px-4 py-2.5 sm:px-6 sm:py-3 shadow-lg backdrop-blur-xl transition-all hover:border-amber-400 active:scale-95"
           id="doodle-toggle-btn"
         >
           <span className="material-symbols-outlined text-amber-600 transition-transform group-hover:rotate-12">
             draw
           </span>
-          <span className="font-metadata-caps text-[10px] tracking-[0.3em] text-stone-500 uppercase transition-colors group-hover:text-amber-700">
+          <span className="hidden sm:inline font-metadata-caps text-[10px] tracking-[0.3em] text-stone-500 uppercase transition-colors group-hover:text-amber-700">
             Doodle Mode
           </span>
         </button>

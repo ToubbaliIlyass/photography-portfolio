@@ -1,7 +1,15 @@
 @import "tailwindcss";
 
+/* Tailwind 4 CSS-first dark mode: only activate when .dark class is explicitly present */
+@variant dark (&:where(.dark, .dark *));
+
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  overflow-x: hidden;
 }
 
 @theme {
@@ -32,4 +40,48 @@ html {
 
 .polaroid-card:active {
   cursor: grabbing;
+}
+
+/* ── Mobile about section ── */
+@keyframes about-polaroid-3d {
+  0%,  100% { transform: perspective(700px) rotate(-1deg)   rotateY(0deg)   rotateX(0deg);  }
+  25%        { transform: perspective(700px) rotate(1.5deg)  rotateY(12deg)  rotateX(-4deg); }
+  50%        { transform: perspective(700px) rotate(-0.5deg) rotateY(-10deg) rotateX(3deg);  }
+  75%        { transform: perspective(700px) rotate(2deg)    rotateY(6deg)   rotateX(-2deg); }
+}
+
+/* Label + polaroid fade-in on IntersectionObserver trigger */
+.about-anim-wrap-label,
+.about-anim-wrap-card {
+  opacity: 0;
+  transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.about-anim-wrap-label { transform: translateY(-10px); }
+.about-anim-wrap-card  { transform: translateY(16px) scale(0.97); }
+
+.mobile-about-content.is-visible .about-anim-wrap-label { opacity: 1; transform: none; }
+.mobile-about-content.is-visible .about-anim-wrap-card  { opacity: 1; transform: none; transition-delay: 0.1s; }
+
+/* Bio wrapper: always visible — Framer Motion controls each word's opacity */
+.about-anim-wrap-bio { opacity: 1; }
+
+.about-polaroid-inner {
+  animation: about-polaroid-3d 9s ease-in-out 0.85s infinite;
+  animation-play-state: paused;
+}
+
+.mobile-about-content.is-visible .about-polaroid-inner {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .about-polaroid-inner { animation: none; }
+}
+
+/* Framer Motion controls opacity + y on each word via motion values */
+.about-word {
+  display: inline-block;
+  margin-right: 0.28em;
 }

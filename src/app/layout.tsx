@@ -1,6 +1,6 @@
 import "~/styles/globals.css";
 
-import { type Metadata } from "next";
+import { type Metadata, type Viewport } from "next";
 import { Geist, Cormorant_Garamond, Inter, Newsreader, Pinyon_Script } from "next/font/google";
 import Footer from "~/components/Footer";
 
@@ -8,6 +8,13 @@ export const metadata: Metadata = {
   title: "ABSTRACTA - Photography Portfolio",
   description: "Contemporary art photography portfolio",
   icons: [{ rel: "icon", url: "/favicon.ico" }],
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 const geist = Geist({
