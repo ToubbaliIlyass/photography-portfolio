@@ -2,6 +2,7 @@ import "~/styles/globals.css";
 
 import { type Metadata } from "next";
 import { Geist, Cormorant_Garamond, Inter, Newsreader, Pinyon_Script } from "next/font/google";
+import Footer from "~/components/Footer";
 
 export const metadata: Metadata = {
   title: "ABSTRACTA - Photography Portfolio",
@@ -59,6 +60,7 @@ export default function RootLayout({
       </head>
       <body className="light bg-background text-on-background min-h-screen flex flex-col font-body-elegant selection:bg-amber-100 selection:text-amber-900">
         {children}
+        <Footer />
       </body>
     </html>
   );

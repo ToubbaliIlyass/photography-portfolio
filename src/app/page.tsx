@@ -1060,8 +1060,8 @@ export default function HomePage() {
               <span className="font-metadata-caps mb-1 text-[8px] tracking-widest text-amber-600 uppercase">
                 Portrait
               </span>
-              <span className="font-sans text-[1.1rem] font-black tracking-[-0.06em] text-stone-900 uppercase">
-                Howa
+              <span className="font-sans text-[1.1rem] tracking-[-0.06em] text-stone-900 uppercase">
+                Ilyass Toubbali
               </span>
             </div>
           </div>
@@ -1410,14 +1410,14 @@ export default function HomePage() {
       ) : null}
 
       {/* Footer */}
-      <footer className="mt-auto mb-8 flex w-full flex-col items-center gap-6 bg-transparent py-12">
+      {/* <footer className="mt-auto mb-8 flex w-full flex-col items-center gap-6 bg-transparent py-12">
         <div className="font-section-cursive text-2xl text-stone-600">
           Abstracta
         </div>
         <p className="font-metadata-caps text-[9px] tracking-[0.3em] text-stone-400 uppercase">
           © 2026 ABSTRACTA GALLERY. ALL RIGHTS RESERVED.
         </p>
-      </footer>
+      </footer> */}
 
       {/* Doodle Controls Fixed Position */}
       <div className="fixed right-8 bottom-8 z-50 flex flex-col items-end gap-4">
