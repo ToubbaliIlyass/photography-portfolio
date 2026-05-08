@@ -175,7 +175,7 @@ export default function HomePage() {
     try {
       const response = await fetch("/api/contact", {
         method: "POST",
-        body: formData,
+        body: formData
       });
 
       const data = (await response.json()) as {
@@ -1021,11 +1021,8 @@ export default function HomePage() {
           </span>
         </button>
         {/* Instruction Hint */}
-        <div className="mt-8 flex animate-pulse items-center gap-3 opacity-100">
-          <span className="material-symbols-outlined text-2xl text-stone-700">
-            drag_pan
-          </span>
-          <span className="font-metadata-caps text-sm font-bold tracking-[0.15em] text-stone-800 uppercase">
+        <div className="pointer-events-none absolute bottom-6 left-1/2 z-30 -translate-x-1/2 sm:bottom-10">
+          <span className="font-metadata-caps animate-pulse text-[11px] font-bold tracking-[0.14em] text-stone-800 uppercase sm:text-sm">
             Drag top card to reveal unique perspectives
           </span>
         </div>
@@ -1162,8 +1159,10 @@ export default function HomePage() {
           id="your-turn"
         >
           <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden opacity-70">
-            <h2 className="text-center font-sans text-[clamp(7rem,18vw,18rem)] leading-[0.8] font-black -tracking-widest text-stone-900 uppercase dark:text-stone-100">
-              Your Turn
+            <h2 className="text-center font-sans text-[clamp(9rem,22vw,22rem)] leading-[0.8] font-black -tracking-widest text-stone-900/90 uppercase dark:text-stone-100/90">
+              Your
+              <br />
+              Turn
             </h2>
           </div>
 
